@@ -25,11 +25,13 @@ online-order-management-system/
 │   ├── logger/                    # Structured JSON logging
 │   ├── retryutil/                 # Retry utilities with exponential backoff
 │   └── validation/                # Generic validation types and utilities
+├── migrations/                    # 🗄️  Database migrations (versioned schema changes)
+│   ├── 000001_create_orders_tables.up.sql    # Create tables migration
+│   └── 000001_create_orders_tables.down.sql  # Rollback migration
 ├── config/                        # ⚙️  Configuration management
 ├── test/                          # 🧪 Stress tests and benchmarks
 ├── docs/                          # 📚 Auto-generated Swagger documentation
 ├── docker-compose.yml             # 🐳 Database setup
-├── schema.sql                     # 🗄️  Database schema
 └── main.go                        # 🚀 Application entry point
 ```
 
@@ -77,11 +79,16 @@ Or view the complete sample in `env.example` file.
 # 3. Start database
 make db-up
 
-# 4. Run server
+# 4. Run database migrations (first time setup)
+make migrate-up
+
+# 5. Run server
 make run
 ```
 
 The server will start on `http://localhost:8080`
+
+> 📝 **Note**: The application automatically runs pending migrations on startup, so step 4 is optional for development but useful to verify migration setup.
 
 ### Access Swagger
 
@@ -116,6 +123,12 @@ make test               # Run tests
 make db-up              # Start PostgreSQL database
 make db-down            # Stop database
 make db-reset           # Reset database
+
+# Database Migrations
+make migrate-up         # Run all pending migrations
+make migrate-down       # Rollback one migration
+make migrate-create     # Create a new migration (name=migration_name)
+make migrate-status     # Show current migration status
 
 # Load Testing
 make test-stress        # 1,000 orders stress test
@@ -165,6 +178,39 @@ curl -X POST http://localhost:8080/api/v1/orders \
 curl "http://localhost:8080/api/v1/orders?page=1&limit=10"
 ```
 
+## Database Migrations
+
+This project uses [golang-migrate/migrate](https://github.com/golang-migrate/migrate) for versioned database schema management.
+
+### Migration Structure
+
+```
+migrations/
+├── 000001_create_orders_tables.up.sql    # Creates orders and order_items tables
+├── 000001_create_orders_tables.down.sql  # Drops orders and order_items tables
+├── 000002_add_indexes.up.sql             # Future migration example
+└── 000002_add_indexes.down.sql           # Future rollback example
+```
+
+### Migration Commands
+
+```bash
+# Run all pending migrations
+make migrate-up
+
+# Check current migration version
+make migrate-status
+
+# Rollback the last migration
+make migrate-down
+
+# Create a new migration
+make migrate-create name=add_user_table
+
+# Force migration version (emergency use only)
+make migrate-force version=1
+```
+
 ---
 
-**Built with Clean Architecture • High Concurrency • PostgreSQL • Swagger Documentation**
+**Built with Clean Architecture • High Concurrency • PostgreSQL • Versioned Migrations • Swagger Documentation**

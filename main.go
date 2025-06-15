@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"online-order-management-system/internal/api/http/handler"
+	"online-order-management-system/internal/api/validation"
 	"online-order-management-system/internal/infra/db"
 	"online-order-management-system/internal/middleware"
 	"online-order-management-system/internal/usecase/order"
@@ -63,6 +64,22 @@ func main() {
 
 	appLogger.Info("Successfully connected to database")
 
+	// Run database migrations
+	migrationManager := db.NewMigrationManager(database)
+	if err := migrationManager.RunMigrations("migrations"); err != nil {
+		appLogger.WithError(err).Fatal("Failed to run database migrations")
+	}
+
+	// Log current migration version
+	if version, dirty, err := migrationManager.GetMigrationVersion("migrations"); err != nil {
+		appLogger.WithError(err).Warn("Failed to get migration version")
+	} else {
+		appLogger.WithFields(map[string]interface{}{
+			"version": version,
+			"dirty":   dirty,
+		}).Info("Database migration status")
+	}
+
 	// Initialize repository
 	orderRepo := db.NewPostgresOrderRepository(database)
 
@@ -86,6 +103,9 @@ func main() {
 
 	// Initialize Gin router
 	router := gin.Default()
+
+	// Register custom validations
+	validation.RegisterCustomValidations()
 
 	// Middleware
 	router.Use(middleware.GinLoggingMiddleware())

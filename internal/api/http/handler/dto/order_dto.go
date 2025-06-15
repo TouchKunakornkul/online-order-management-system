@@ -7,13 +7,13 @@ import (
 
 // CreateOrderRequest represents the API request for creating an order
 type CreateOrderRequest struct {
-	CustomerName string                   `json:"customer_name" binding:"required" example:"John Doe" validate:"required"`
-	Items        []CreateOrderItemRequest `json:"items" binding:"required,min=1" validate:"required,min=1"`
+	CustomerName string                   `json:"customer_name" binding:"required,max=100" example:"John Doe" validate:"required,max=100"`
+	Items        []CreateOrderItemRequest `json:"items" binding:"required,min=1,dive" validate:"required,min=1,dive"`
 }
 
 // CreateOrderItemRequest represents an order item in the create request
 type CreateOrderItemRequest struct {
-	ProductName string  `json:"product_name" binding:"required" example:"Laptop Computer" validate:"required"`
+	ProductName string  `json:"product_name" binding:"required,max=100" example:"Laptop Computer" validate:"required,max=100"`
 	Quantity    int     `json:"quantity" binding:"required,min=1" example:"2" validate:"required,min=1"`
 	UnitPrice   float64 `json:"unit_price" binding:"required,min=0" example:"999.99" validate:"required,min=0"`
 }

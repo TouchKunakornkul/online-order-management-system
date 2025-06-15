@@ -15,6 +15,10 @@ help:
 	@echo "  make db-up          - Start PostgreSQL database"
 	@echo "  make db-down        - Stop PostgreSQL database"
 	@echo "  make db-reset       - Reset database (stop, remove, start)"
+	@echo "  make migrate-up     - Run all pending migrations"
+	@echo "  make migrate-down   - Rollback one migration"
+	@echo "  make migrate-create - Create a new migration (name=migration_name)"
+	@echo "  make migrate-status - Show current migration status"
 	@echo "  make clean          - Clean build artifacts"
 	@echo "  make dev            - Start development environment (db + server)"
 	@echo "  make swagger-install - Install Swagger generator"
@@ -245,4 +249,62 @@ swagger-clean:
 
 # Regenerate Swagger documentation (clean + generate)
 swagger-regen: swagger-clean swagger-generate
-	@echo "🔄 Swagger documentation regenerated!" 
+	@echo "🔄 Swagger documentation regenerated!"
+
+# Migration commands
+
+# Run all pending migrations
+migrate-up: db-up
+	@echo "🔄 Running database migrations..."
+	@if ! command -v $$(go env GOPATH)/bin/migrate >/dev/null 2>&1; then \
+		echo "❌ migrate CLI not found. Installing..."; \
+		go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest; \
+	fi
+	@$$(go env GOPATH)/bin/migrate -path migrations -database "postgres://user:password@localhost:5432/orderdb?sslmode=disable" up
+	@echo "✅ Migrations completed successfully!"
+
+# Rollback one migration
+migrate-down: db-up
+	@echo "⬇️  Rolling back last migration..."
+	@if ! command -v $$(go env GOPATH)/bin/migrate >/dev/null 2>&1; then \
+		echo "❌ migrate CLI not found. Installing..."; \
+		go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest; \
+	fi
+	@$$(go env GOPATH)/bin/migrate -path migrations -database "postgres://user:password@localhost:5432/orderdb?sslmode=disable" down 1
+	@echo "✅ Migration rolled back successfully!"
+
+# Create a new migration
+migrate-create:
+	@if [ -z "$(name)" ]; then \
+		echo "❌ Please provide a migration name: make migrate-create name=migration_name"; \
+		exit 1; \
+	fi
+	@echo "📝 Creating new migration: $(name)"
+	@if ! command -v $$(go env GOPATH)/bin/migrate >/dev/null 2>&1; then \
+		echo "❌ migrate CLI not found. Installing..."; \
+		go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest; \
+	fi
+	@$$(go env GOPATH)/bin/migrate create -ext sql -dir migrations -seq $(name)
+	@echo "✅ Migration files created successfully!"
+
+# Show migration status
+migrate-status: db-up
+	@echo "📊 Checking migration status..."
+	@if ! command -v $$(go env GOPATH)/bin/migrate >/dev/null 2>&1; then \
+		echo "❌ migrate CLI not found. Installing..."; \
+		go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest; \
+	fi
+	@$$(go env GOPATH)/bin/migrate -path migrations -database "postgres://user:password@localhost:5432/orderdb?sslmode=disable" version
+	@echo "✅ Migration status checked!"
+
+# Force migration version (use with caution)
+migrate-force:
+	@if [ -z "$(version)" ]; then \
+		echo "❌ Please provide a version number: make migrate-force version=1"; \
+		exit 1; \
+	fi
+	@echo "⚠️  Forcing migration version to: $(version)"
+	@echo "⚠️  WARNING: This should only be used to recover from failed migrations!"
+	@read -p "Are you sure? (y/N): " confirm && [ "$$confirm" = "y" ] || exit 1
+	@$$(go env GOPATH)/bin/migrate -path migrations -database "postgres://user:password@localhost:5432/orderdb?sslmode=disable" force $(version)
+	@echo "✅ Migration version forced to $(version)!" 

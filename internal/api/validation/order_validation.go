@@ -1,9 +1,41 @@
 package validation
 
 import (
-	"online-order-management-system/pkg/validation"
+	"fmt"
+	"reflect"
 	"strings"
+
+	"online-order-management-system/pkg/validation"
+
+	"github.com/gin-gonic/gin/binding"
+	"github.com/go-playground/validator/v10"
 )
+
+// RegisterCustomValidations registers custom validation functions with Gin
+func RegisterCustomValidations() {
+	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
+		// Register custom validation for string max length
+		v.RegisterValidation("maxlen", func(fl validator.FieldLevel) bool {
+			param := fl.Param()
+			if param == "" {
+				return true
+			}
+
+			// Parse the max length parameter
+			var maxLen int
+			if _, err := fmt.Sscanf(param, "%d", &maxLen); err != nil {
+				return true // If we can't parse, let it pass
+			}
+
+			// Check if field is a string and validate length
+			if fl.Field().Kind() == reflect.String {
+				return len(fl.Field().String()) <= maxLen
+			}
+
+			return true
+		})
+	}
+}
 
 // GetOrderValidationMessage returns order-specific user-friendly error messages
 func GetOrderValidationMessage(err error) string {
@@ -27,67 +59,58 @@ func GetOrderValidationMessage(err error) string {
 			return "At least one item is required"
 		}
 		if strings.Contains(errStr, "ProductName") {
-			return "Product name is required for all items"
+			return "Product name is required"
 		}
-		if strings.Contains(errStr, "Status") {
-			return "Status is required"
+		if strings.Contains(errStr, "Quantity") {
+			return "Quantity is required"
 		}
-		// Generic required field handling
+		if strings.Contains(errStr, "UnitPrice") {
+			return "Unit price is required"
+		}
 		return "This field is required"
 	}
 
-	// Handle order items validation
-	if strings.Contains(errStr, "min") {
-		if strings.Contains(errStr, "Items") {
-			return "At least one item is required"
+	// Handle length validation errors
+	if strings.Contains(errStr, "max") || strings.Contains(errStr, "maxlen") {
+		if strings.Contains(errStr, "CustomerName") {
+			return "Customer name must not exceed 100 characters"
 		}
+		if strings.Contains(errStr, "ProductName") {
+			return "Product name must not exceed 100 characters"
+		}
+		return "Field exceeds maximum allowed length"
+	}
+
+	// Handle minimum value validation errors
+	if strings.Contains(errStr, "min") {
 		if strings.Contains(errStr, "Quantity") {
 			return "Quantity must be at least 1"
 		}
 		if strings.Contains(errStr, "UnitPrice") {
-			return "Unit price must be 0 or greater"
+			return "Unit price must be greater than 0"
 		}
-		// Generic min validation
-		if strings.Contains(errStr, "array") || strings.Contains(errStr, "slice") {
+		if strings.Contains(errStr, "Items") {
 			return "At least one item is required"
 		}
-		return "Value is too small"
+		return "Field does not meet minimum requirements"
 	}
 
-	// Handle max validation
-	if strings.Contains(errStr, "max") {
-		return "Value is too large"
+	// Handle numeric validation errors
+	if strings.Contains(errStr, "number") {
+		return "Field must be a valid number"
 	}
 
-	// Handle email validation
-	if strings.Contains(errStr, "email") {
-		return "Invalid email format"
-	}
-
-	// Handle URL validation
-	if strings.Contains(errStr, "url") {
-		return "Invalid URL format"
-	}
-
-	// Handle oneof validation (generic case)
-	if strings.Contains(errStr, "oneof") {
-		return "Invalid value. Please check allowed values"
-	}
-
-	// Handle JSON parsing errors
-	if strings.Contains(errStr, "invalid character") || strings.Contains(errStr, "unexpected end of JSON") {
-		return "Invalid JSON format in request body"
-	}
-
-	// Default to original error if no specific handling
-	return errStr
+	// Return the original error if no specific handling is found
+	return err.Error()
 }
 
 // Order field validation constants
 const (
-	MinQuantity  = 1
-	MinUnitPrice = 0.0
-	MinItems     = 1
+	MinQuantity     = 1
+	MinUnitPrice    = 0.0
+	MinItems        = 1
+	MaxCustomerName = 100
+	MaxProductName  = 100
 )
 
 // ValidateOrderFields performs order-specific field validation
@@ -95,13 +118,24 @@ func ValidateOrderFields(customerName string, items []interface{}) *validation.V
 	result := validation.NewValidationResult()
 
 	// Validate customer name
-	if strings.TrimSpace(customerName) == "" {
+	trimmedCustomerName := strings.TrimSpace(customerName)
+	if trimmedCustomerName == "" {
 		result.AddError(validation.NewFieldValidationError(
 			"customer_name",
 			"required",
 			"Customer name is required",
 			customerName,
 		))
+	} else if len(trimmedCustomerName) > MaxCustomerName {
+		result.AddError(validation.NewFieldValidationError(
+			"customer_name",
+			"max",
+			"Customer name cannot exceed 100 characters",
+			customerName,
+		).WithDetails(map[string]interface{}{
+			"max_length":     MaxCustomerName,
+			"current_length": len(trimmedCustomerName),
+		}))
 	}
 
 	// Validate items
@@ -122,7 +156,8 @@ func ValidateOrderItemFields(itemIndex int, productName string, quantity int, un
 	result := validation.NewValidationResult()
 
 	// Validate product name
-	if strings.TrimSpace(productName) == "" {
+	trimmedProductName := strings.TrimSpace(productName)
+	if trimmedProductName == "" {
 		result.AddError(validation.NewFieldValidationError(
 			"product_name",
 			"required",
@@ -130,6 +165,17 @@ func ValidateOrderItemFields(itemIndex int, productName string, quantity int, un
 			productName,
 		).WithDetails(map[string]interface{}{
 			"item_index": itemIndex,
+		}))
+	} else if len(trimmedProductName) > MaxProductName {
+		result.AddError(validation.NewFieldValidationError(
+			"product_name",
+			"max",
+			"Product name cannot exceed 100 characters",
+			productName,
+		).WithDetails(map[string]interface{}{
+			"item_index":     itemIndex,
+			"max_length":     MaxProductName,
+			"current_length": len(trimmedProductName),
 		}))
 	}
 
