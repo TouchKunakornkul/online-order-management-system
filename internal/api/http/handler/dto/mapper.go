@@ -17,9 +17,8 @@ func (req *CreateOrderRequest) ToUseCaseCreateOrderRequest() order.CreateOrderRe
 	}
 
 	return order.CreateOrderRequest{
-		CustomerName:  req.CustomerName,
-		CustomerEmail: req.CustomerEmail,
-		Items:         items,
+		CustomerName: req.CustomerName,
+		Items:        items,
 	}
 }
 
@@ -45,14 +44,13 @@ func FromDomainOrder(domainOrder *entity.Order) OrderResponse {
 	}
 
 	return OrderResponse{
-		ID:            domainOrder.ID,
-		CustomerName:  domainOrder.CustomerName,
-		CustomerEmail: domainOrder.CustomerEmail,
-		Status:        domainOrder.Status,
-		TotalAmount:   domainOrder.TotalAmount,
-		Items:         items,
-		CreatedAt:     domainOrder.CreatedAt,
-		UpdatedAt:     domainOrder.UpdatedAt,
+		ID:           domainOrder.ID,
+		CustomerName: domainOrder.CustomerName,
+		Status:       domainOrder.Status,
+		TotalAmount:  domainOrder.TotalAmount,
+		Items:        items,
+		CreatedAt:    domainOrder.CreatedAt,
+		UpdatedAt:    domainOrder.UpdatedAt,
 	}
 }
 

@@ -94,14 +94,13 @@ func (r *PostgresOrderRepository) createOrderWithItemsInternal(ctx context.Conte
 
 	// Insert order
 	orderQuery := `
-		INSERT INTO orders (customer_name, customer_email, total_amount, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO orders (customer_name, total_amount, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id`
 
 	var orderID int64
 	err = tx.QueryRowContext(ctx, orderQuery,
 		order.CustomerName,
-		order.CustomerEmail,
 		order.TotalAmount,
 		order.Status,
 		order.CreatedAt,
@@ -147,14 +146,13 @@ func (r *PostgresOrderRepository) createOrderWithItemsInternal(ctx context.Conte
 
 	// Return the created order with IDs
 	createdOrder := &entity.Order{
-		ID:            orderID,
-		CustomerName:  order.CustomerName,
-		CustomerEmail: order.CustomerEmail,
-		TotalAmount:   order.TotalAmount,
-		Status:        order.Status,
-		Items:         items,
-		CreatedAt:     order.CreatedAt,
-		UpdatedAt:     order.UpdatedAt,
+		ID:           orderID,
+		CustomerName: order.CustomerName,
+		TotalAmount:  order.TotalAmount,
+		Status:       order.Status,
+		Items:        items,
+		CreatedAt:    order.CreatedAt,
+		UpdatedAt:    order.UpdatedAt,
 	}
 
 	return createdOrder, nil
@@ -164,7 +162,7 @@ func (r *PostgresOrderRepository) createOrderWithItemsInternal(ctx context.Conte
 func (r *PostgresOrderRepository) GetOrderByID(ctx context.Context, id int64) (*entity.Order, error) {
 	// Get order
 	orderQuery := `
-		SELECT id, customer_name, customer_email, total_amount, status, created_at, updated_at
+		SELECT id, customer_name, total_amount, status, created_at, updated_at
 		FROM orders
 		WHERE id = $1`
 
@@ -172,7 +170,6 @@ func (r *PostgresOrderRepository) GetOrderByID(ctx context.Context, id int64) (*
 	err := r.db.QueryRowContext(ctx, orderQuery, id).Scan(
 		&order.ID,
 		&order.CustomerName,
-		&order.CustomerEmail,
 		&order.TotalAmount,
 		&order.Status,
 		&order.CreatedAt,
@@ -256,7 +253,7 @@ func (r *PostgresOrderRepository) ListOrders(ctx context.Context, page int, limi
 
 	// Get orders with pagination
 	query := `
-		SELECT id, customer_name, customer_email, total_amount, status, created_at, updated_at
+		SELECT id, customer_name, total_amount, status, created_at, updated_at
 		FROM orders
 		ORDER BY created_at DESC, id DESC
 		LIMIT $1 OFFSET $2`
@@ -273,7 +270,6 @@ func (r *PostgresOrderRepository) ListOrders(ctx context.Context, page int, limi
 		err := rows.Scan(
 			&order.ID,
 			&order.CustomerName,
-			&order.CustomerEmail,
 			&order.TotalAmount,
 			&order.Status,
 			&order.CreatedAt,

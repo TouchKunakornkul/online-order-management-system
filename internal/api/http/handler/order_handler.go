@@ -78,9 +78,6 @@ func getValidationErrorMessage(err error) string {
 		if strings.Contains(errStr, "CustomerName") {
 			return "Customer name is required"
 		}
-		if strings.Contains(errStr, "CustomerEmail") {
-			return "Customer email is required"
-		}
 		if strings.Contains(errStr, "Items") {
 			return "At least one item is required"
 		}
@@ -90,11 +87,6 @@ func getValidationErrorMessage(err error) string {
 		if strings.Contains(errStr, "Status") {
 			return "Status is required"
 		}
-	}
-
-	// Handle email validation errors
-	if strings.Contains(errStr, "email") {
-		return "Invalid email format"
 	}
 
 	// Handle items array validation errors

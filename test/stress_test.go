@@ -53,8 +53,7 @@ type OrderMetrics struct {
 
 func createStressTestOrder(orderID int) dto.CreateOrderRequest {
 	return dto.CreateOrderRequest{
-		CustomerName:  fmt.Sprintf("StressTest Customer %d", orderID),
-		CustomerEmail: fmt.Sprintf("stress%d@loadtest.com", orderID),
+		CustomerName: fmt.Sprintf("StressTest Customer %d", orderID),
 		Items: []dto.CreateOrderItemRequest{
 			{
 				ProductName: fmt.Sprintf("Product-%d-A", orderID),

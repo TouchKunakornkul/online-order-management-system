@@ -249,15 +249,10 @@ const docTemplate = `{
         "dto.CreateOrderRequest": {
             "type": "object",
             "required": [
-                "customer_email",
                 "customer_name",
                 "items"
             ],
             "properties": {
-                "customer_email": {
-                    "type": "string",
-                    "example": "john.doe@example.com"
-                },
                 "customer_name": {
                     "type": "string",
                     "example": "John Doe"
@@ -329,10 +324,6 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string",
                     "example": "2023-06-15T10:30:00Z"
-                },
-                "customer_email": {
-                    "type": "string",
-                    "example": "john.doe@example.com"
                 },
                 "customer_name": {
                     "type": "string",

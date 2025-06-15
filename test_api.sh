@@ -19,7 +19,6 @@ ORDER_RESPONSE=$(curl -s -X POST "$BASE_URL/orders" \
   -H "Content-Type: application/json" \
   -d '{
     "customer_name": "John Doe",
-    "customer_email": "john@example.com",
     "items": [
       {
         "product_name": "Laptop",
@@ -57,7 +56,6 @@ curl -s -X POST "$BASE_URL/orders" \
   -H "Content-Type: application/json" \
   -d '{
     "customer_name": "Jane Smith",
-    "customer_email": "jane@example.com",
     "items": [
       {
         "product_name": "Keyboard",
@@ -81,7 +79,6 @@ curl -s -X POST "$BASE_URL/orders/bulk" \
     "orders": [
       {
         "customer_name": "Alice Johnson",
-        "customer_email": "alice@example.com",
         "items": [
           {
             "product_name": "Monitor",
@@ -92,7 +89,6 @@ curl -s -X POST "$BASE_URL/orders/bulk" \
       },
       {
         "customer_name": "Bob Wilson",
-        "customer_email": "bob@example.com",
         "items": [
           {
             "product_name": "Headphones",

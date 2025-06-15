@@ -7,9 +7,8 @@ import (
 
 // CreateOrderRequest represents the API request for creating an order
 type CreateOrderRequest struct {
-	CustomerName  string                   `json:"customer_name" binding:"required" example:"John Doe" validate:"required"`
-	CustomerEmail string                   `json:"customer_email" binding:"required,email" example:"john.doe@example.com" validate:"required,email"`
-	Items         []CreateOrderItemRequest `json:"items" binding:"required,min=1" validate:"required,min=1"`
+	CustomerName string                   `json:"customer_name" binding:"required" example:"John Doe" validate:"required"`
+	Items        []CreateOrderItemRequest `json:"items" binding:"required,min=1" validate:"required,min=1"`
 }
 
 // CreateOrderItemRequest represents an order item in the create request
@@ -26,14 +25,13 @@ type UpdateOrderStatusRequest struct {
 
 // OrderResponse represents the API response for a single order
 type OrderResponse struct {
-	ID            int64               `json:"id" example:"12345"`
-	CustomerName  string              `json:"customer_name" example:"John Doe"`
-	CustomerEmail string              `json:"customer_email" example:"john.doe@example.com"`
-	Status        string              `json:"status" example:"pending" enums:"pending,processing,completed,cancelled"`
-	TotalAmount   float64             `json:"total_amount" example:"1999.98"`
-	Items         []OrderItemResponse `json:"items"`
-	CreatedAt     time.Time           `json:"created_at" example:"2023-06-15T10:30:00Z"`
-	UpdatedAt     time.Time           `json:"updated_at" example:"2023-06-15T10:30:00Z"`
+	ID           int64               `json:"id" example:"12345"`
+	CustomerName string              `json:"customer_name" example:"John Doe"`
+	Status       string              `json:"status" example:"pending" enums:"pending,processing,completed,cancelled"`
+	TotalAmount  float64             `json:"total_amount" example:"1999.98"`
+	Items        []OrderItemResponse `json:"items"`
+	CreatedAt    time.Time           `json:"created_at" example:"2023-06-15T10:30:00Z"`
+	UpdatedAt    time.Time           `json:"updated_at" example:"2023-06-15T10:30:00Z"`
 }
 
 // OrderItemResponse represents an order item in the API response

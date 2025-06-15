@@ -137,7 +137,6 @@ curl -X POST http://localhost:8080/api/v1/orders \
   -H "Content-Type: application/json" \
   -d '{
     "customer_name": "John Doe",
-    "customer_email": "john@example.com",
     "items": [
       {
         "product_name": "Laptop",

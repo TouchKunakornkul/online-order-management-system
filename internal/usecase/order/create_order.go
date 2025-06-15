@@ -20,9 +20,8 @@ func NewCreateOrderUseCase(orderRepo repository.OrderRepository) *CreateOrderUse
 
 // CreateOrderRequest represents the input for creating an order
 type CreateOrderRequest struct {
-	CustomerName  string                   `json:"customer_name" binding:"required"`
-	CustomerEmail string                   `json:"customer_email" binding:"required,email"`
-	Items         []CreateOrderItemRequest `json:"items" binding:"required,min=1"`
+	CustomerName string                   `json:"customer_name" binding:"required"`
+	Items        []CreateOrderItemRequest `json:"items" binding:"required,min=1"`
 }
 
 // CreateOrderItemRequest represents an order item in the request
@@ -45,7 +44,7 @@ func (uc *CreateOrderUseCase) Execute(ctx context.Context, req CreateOrderReques
 	}
 
 	// Create order domain entity with business rules validation
-	order, err := entity.NewOrder(req.CustomerName, req.CustomerEmail, items)
+	order, err := entity.NewOrder(req.CustomerName, items)
 	if err != nil {
 		return nil, err
 	}

@@ -20,9 +20,6 @@ definitions:
     type: object
   dto.CreateOrderRequest:
     properties:
-      customer_email:
-        example: john.doe@example.com
-        type: string
       customer_name:
         example: John Doe
         type: string
@@ -32,7 +29,6 @@ definitions:
         minItems: 1
         type: array
     required:
-    - customer_email
     - customer_name
     - items
     type: object
@@ -76,9 +72,6 @@ definitions:
     properties:
       created_at:
         example: "2023-06-15T10:30:00Z"
-        type: string
-      customer_email:
-        example: john.doe@example.com
         type: string
       customer_name:
         example: John Doe

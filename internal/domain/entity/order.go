@@ -7,14 +7,13 @@ import (
 
 // Order represents the order domain entity
 type Order struct {
-	ID            int64       `json:"id"`
-	CustomerName  string      `json:"customer_name"`
-	CustomerEmail string      `json:"customer_email"`
-	Status        string      `json:"status"`
-	TotalAmount   float64     `json:"total_amount"`
-	Items         []OrderItem `json:"items"`
-	CreatedAt     time.Time   `json:"created_at"`
-	UpdatedAt     time.Time   `json:"updated_at"`
+	ID           int64       `json:"id"`
+	CustomerName string      `json:"customer_name"`
+	Status       string      `json:"status"`
+	TotalAmount  float64     `json:"total_amount"`
+	Items        []OrderItem `json:"items"`
+	CreatedAt    time.Time   `json:"created_at"`
+	UpdatedAt    time.Time   `json:"updated_at"`
 }
 
 // OrderItem represents an order item domain entity
@@ -31,12 +30,9 @@ type OrderItem struct {
 var ValidStatuses = []string{"pending", "processing", "completed", "cancelled"}
 
 // NewOrder creates a new order with validation
-func NewOrder(customerName, customerEmail string, items []OrderItem) (*Order, error) {
+func NewOrder(customerName string, items []OrderItem) (*Order, error) {
 	if customerName == "" {
 		return nil, errors.New("customer name is required")
-	}
-	if customerEmail == "" {
-		return nil, errors.New("customer email is required")
 	}
 	if len(items) == 0 {
 		return nil, errors.New("order must have at least one item")
@@ -56,13 +52,12 @@ func NewOrder(customerName, customerEmail string, items []OrderItem) (*Order, er
 	}
 
 	return &Order{
-		CustomerName:  customerName,
-		CustomerEmail: customerEmail,
-		Status:        "pending",
-		TotalAmount:   totalAmount,
-		Items:         items,
-		CreatedAt:     time.Now(),
-		UpdatedAt:     time.Now(),
+		CustomerName: customerName,
+		Status:       "pending",
+		TotalAmount:  totalAmount,
+		Items:        items,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
 	}, nil
 }
 
