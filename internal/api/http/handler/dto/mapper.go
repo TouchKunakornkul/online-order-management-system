@@ -69,6 +69,6 @@ func FromDomainOrders(domainOrders []*entity.Order) []OrderResponse {
 func FromUseCaseListOrdersResponse(useCaseResponse *order.ListOrdersResponse) ListOrdersResponse {
 	return ListOrdersResponse{
 		Orders:     FromDomainOrders(useCaseResponse.Orders),
-		NextCursor: useCaseResponse.NextCursor,
+		Pagination: FromDomainPaginationInfo(useCaseResponse.Pagination),
 	}
 }

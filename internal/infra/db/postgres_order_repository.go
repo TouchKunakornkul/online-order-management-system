@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"online-order-management-system/internal/domain/entity"
 	"online-order-management-system/internal/domain/repository"
-	"strconv"
 	"strings"
 	"time"
 
@@ -224,42 +223,47 @@ func (r *PostgresOrderRepository) GetOrderByID(ctx context.Context, id int64) (*
 	return &order, nil
 }
 
-// ListOrders retrieves orders with pagination using cursor-based pagination
-func (r *PostgresOrderRepository) ListOrders(ctx context.Context, limit int, cursor string) ([]*entity.Order, string, error) {
-	var query string
-	var args []interface{}
-
-	baseQuery := `
-		SELECT id, customer_name, customer_email, total_amount, status, created_at, updated_at
-		FROM orders`
-
-	if cursor != "" {
-		// Parse cursor: format is "created_at_id"
-		parts := strings.Split(cursor, "_")
-		if len(parts) != 2 {
-			return nil, "", fmt.Errorf("invalid cursor format")
-		}
-
-		createdAt, err := time.Parse(time.RFC3339, parts[0])
-		if err != nil {
-			return nil, "", fmt.Errorf("invalid cursor timestamp: %w", err)
-		}
-
-		id, err := strconv.ParseInt(parts[1], 10, 64)
-		if err != nil {
-			return nil, "", fmt.Errorf("invalid cursor id: %w", err)
-		}
-
-		query = baseQuery + ` WHERE (created_at, id) < ($1, $2) ORDER BY created_at DESC, id DESC LIMIT $3`
-		args = []interface{}{createdAt, id, limit}
-	} else {
-		query = baseQuery + ` ORDER BY created_at DESC, id DESC LIMIT $1`
-		args = []interface{}{limit}
+// ListOrders retrieves orders with pagination using page number and limit
+func (r *PostgresOrderRepository) ListOrders(ctx context.Context, page int, limit int) ([]*entity.Order, *repository.PaginationInfo, error) {
+	// Validate page number (must be >= 1)
+	if page < 1 {
+		page = 1
 	}
 
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	// Calculate offset
+	offset := (page - 1) * limit
+
+	// Get total count first
+	countQuery := `SELECT COUNT(*) FROM orders`
+	var totalCount int64
+	err := r.db.QueryRowContext(ctx, countQuery).Scan(&totalCount)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to list orders: %w", err)
+		return nil, nil, fmt.Errorf("failed to get total count: %w", err)
+	}
+
+	// Calculate pagination info
+	totalPages := int((totalCount + int64(limit) - 1) / int64(limit)) // Ceiling division
+	if totalPages == 0 {
+		totalPages = 1
+	}
+
+	paginationInfo := &repository.PaginationInfo{
+		CurrentPage:  page,
+		TotalPages:   totalPages,
+		TotalCount:   totalCount,
+		ItemsPerPage: limit,
+	}
+
+	// Get orders with pagination
+	query := `
+		SELECT id, customer_name, customer_email, total_amount, status, created_at, updated_at
+		FROM orders
+		ORDER BY created_at DESC, id DESC
+		LIMIT $1 OFFSET $2`
+
+	rows, err := r.db.QueryContext(ctx, query, limit, offset)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to list orders: %w", err)
 	}
 	defer rows.Close()
 
@@ -276,13 +280,13 @@ func (r *PostgresOrderRepository) ListOrders(ctx context.Context, limit int, cur
 			&order.UpdatedAt,
 		)
 		if err != nil {
-			return nil, "", fmt.Errorf("failed to scan order: %w", err)
+			return nil, nil, fmt.Errorf("failed to scan order: %w", err)
 		}
 
 		// Get items for each order
 		items, err := r.getOrderItems(ctx, order.ID)
 		if err != nil {
-			return nil, "", fmt.Errorf("failed to get order items: %w", err)
+			return nil, nil, fmt.Errorf("failed to get order items: %w", err)
 		}
 		order.Items = items
 
@@ -290,17 +294,10 @@ func (r *PostgresOrderRepository) ListOrders(ctx context.Context, limit int, cur
 	}
 
 	if err = rows.Err(); err != nil {
-		return nil, "", fmt.Errorf("error iterating orders: %w", err)
+		return nil, nil, fmt.Errorf("error iterating orders: %w", err)
 	}
 
-	// Generate next cursor if we have orders
-	var nextCursor string
-	if len(orders) > 0 {
-		lastOrder := orders[len(orders)-1]
-		nextCursor = fmt.Sprintf("%s_%d", lastOrder.CreatedAt.Format(time.RFC3339), lastOrder.ID)
-	}
-
-	return orders, nextCursor, nil
+	return orders, paginationInfo, nil
 }
 
 // UpdateOrderStatus updates the status of an existing order

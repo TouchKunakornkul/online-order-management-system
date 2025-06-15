@@ -2,30 +2,120 @@
 
 A RESTful API built with Go for managing online orders with high concurrent processing capabilities.
 
+## Project Structure
+
+This project leverages a **Clean Architecture** structure that promotes separation of concerns, testability, and maintainability. The architecture is organized into distinct layers with clear dependencies flowing inward.
+
+```
+online-order-management-system/
+├── cmd/                    # Application entry points
+├── internal/
+│   ├── api/http/handler/   # 🌐 Delivery Layer - HTTP handlers and DTOs
+│   ├── domain/             # 🏛️  Domain Layer - Business entities and repository interfaces
+│   ├── infra/db/          # 🔧 Infrastructure Layer - Database implementations
+│   ├── middleware/        # 🛡️  Cross-cutting concerns - HTTP middleware
+│   └── usecase/           # 💼 Use Case Layer - Business logic and orchestration
+├── test/                  # 🧪 Stress tests and benchmarks
+├── docs/                  # 📚 Auto-generated Swagger documentation
+├── docker-compose.yml     # 🐳 Database setup
+├── schema.sql            # 🗄️  Database schema
+└── main.go               # 🚀 Application entry point
+```
+
 ## Quick Start
 
-### 1. Prerequisites
-
-- Go 1.22+
-- Docker & Docker Compose
-
-### 2. Setup & Run
+### Setup & Run
 
 ```bash
-# Setup
+# 1. Clone and setup
+git clone <repository-url>
+cd online-order-management-system
 go mod tidy
 
-# Start database
+# 2. Create a .env file
+cp env.example .env
+# Or create manually with the following content:
+```
+
+**Create a .env file** with the following content:
+
+```bash
+# PostgreSQL Database Configuration
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_USER=user
+POSTGRES_PASSWORD=password
+POSTGRES_DBNAME=orderdb
+POSTGRES_SSLMODE=disable
+
+# Connection Pool Settings
+DB_MAX_OPEN_CONNS=300
+DB_MAX_IDLE_CONNS=150
+DB_CONN_MAX_LIFETIME=45m
+DB_CONN_MAX_IDLE_TIME=20m
+DB_PING_TIMEOUT=15s
+
+# Server Configuration
+PORT=8080
+GIN_MODE=debug
+```
+
+Or view the complete sample in `env.example` file.
+
+```bash
+# 3. Start database
 make db-up
 
-# Run server
+# 4. Run server
 make run
 ```
 
-### 3. Test API
+The server will start on `http://localhost:8080`
+
+### Access Swagger
+
+Open your browser and navigate to:
+
+```
+http://localhost:8080/swagger/index.html
+```
+
+### Load Test
 
 ```bash
-make test-api
+# Stress test: 1,000 orders with 100 concurrent goroutines
+make test-stress
+
+# EXTREME test: 10,000 orders with 500 concurrent goroutines
+make test-stress-extreme
+```
+
+Expected performance: 2,000+ orders/second with 100% success rate.
+
+## Available Commands
+
+```bash
+# Development
+make help               # Show all commands
+make build              # Build application
+make run                # Build and run server
+make test               # Run tests
+
+# Database
+make db-up              # Start PostgreSQL database
+make db-down            # Stop database
+make db-reset           # Reset database
+
+# Load Testing
+make test-stress        # 1,000 orders stress test
+make test-stress-extreme # 10,000 orders extreme test
+
+# Documentation
+make swagger-generate   # Generate Swagger docs
+make swagger-regen      # Regenerate Swagger docs
+
+# Cleanup
+make clean              # Clean build artifacts
 ```
 
 ## API Endpoints
@@ -33,14 +123,14 @@ make test-api
 ```
 GET    /health                  # Health check
 POST   /api/v1/orders           # Create order
-GET    /api/v1/orders           # List orders (with pagination)
+GET    /api/v1/orders           # List orders (page-based pagination)
 GET    /api/v1/orders/:id       # Get order by ID
 PUT    /api/v1/orders/:id/status # Update order status
 ```
 
-## Example Usage
+### Example Usage
 
-### Create Order
+**Create Order:**
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/orders \
@@ -58,177 +148,13 @@ curl -X POST http://localhost:8080/api/v1/orders \
   }'
 ```
 
-### Get Order
+**List Orders:**
 
 ```bash
-curl http://localhost:8080/api/v1/orders/1
+# Get first page
+curl "http://localhost:8080/api/v1/orders?page=1&limit=10"
 ```
 
-### List Orders
+---
 
-```bash
-curl "http://localhost:8080/api/v1/orders?limit=10&cursor=2025-06-14T17:47:05Z_1"
-```
-
-### Update Order Status
-
-```bash
-curl -X PUT http://localhost:8080/api/v1/orders/1/status \
-  -H "Content-Type: application/json" \
-  -d '{"status": "processing"}'
-```
-
-## Stress Testing & Performance
-
-This system is designed to handle high concurrent order creation using goroutines and database transactions.
-
-### Run Stress Tests
-
-```bash
-# Stress test - 1,000 orders with 100 concurrent goroutines
-make test-stress
-
-# EXTREME stress test - 10,000 orders with 500 concurrent goroutines
-make test-stress-extreme
-
-# Run all stress tests
-make test-all-stress
-
-# Run stress benchmark
-make bench-stress
-```
-
-### Performance Expectations
-
-**Stress Test (1,000 orders)**:
-
-- **Success Rate**: ≥ 90%
-- **Orders Per Second**: ≥ 5 OPS
-- **Concurrent Goroutines**: 100
-- **Average Latency**: Variable under stress
-
-**EXTREME Stress Test (10,000 orders)**:
-
-- **Success Rate**: ≥ 80% (acceptable under extreme load)
-- **Orders Per Second**: Variable (performance analysis provided)
-- **Concurrent Goroutines**: 500
-- **Test Duration**: Up to 10 minutes
-
-### Stress Test Configuration
-
-The stress tests create large numbers of orders simultaneously using goroutines:
-
-```go
-// 1,000 orders stress test
-config := StressTestConfig{
-    BaseURL:        "http://localhost:8080",
-    TotalOrders:    1000,         // Total orders to create
-    MaxConcurrency: 100,          // Concurrent goroutines
-    RequestTimeout: 30 * time.Second,
-}
-
-// 10,000 orders EXTREME stress test
-config := StressTestConfig{
-    BaseURL:        "http://localhost:8080",
-    TotalOrders:    10000,        // Total orders to create
-    MaxConcurrency: 500,          // Concurrent goroutines
-    RequestTimeout: 60 * time.Second,
-}
-```
-
-For detailed stress testing documentation, see [docs/CONCURRENT_TESTING.md](docs/CONCURRENT_TESTING.md).
-
-## Available Commands
-
-```bash
-make help               # Show all commands
-make build              # Build application
-make run                # Build and run server
-make test               # Run tests
-make test-api           # Test API endpoints
-make test-stress        # Stress test: 1,000 orders with 100 concurrent goroutines
-make test-stress-extreme # EXTREME stress test: 10,000 orders with 500 goroutines
-make test-all-stress    # Run all stress tests
-make bench-stress       # Run stress benchmarks
-make db-up              # Start database
-make db-down            # Stop database
-make db-reset           # Reset database
-make clean              # Clean build artifacts
-```
-
-## Environment Configuration
-
-The system uses environment variables for configuration. Copy `env.example` to `.env` or set these variables:
-
-### Database Configuration
-
-```bash
-# PostgreSQL Database Configuration
-POSTGRES_HOST=localhost      # Database host (default: localhost)
-POSTGRES_PORT=5432          # Database port (default: 5432)
-POSTGRES_USER=user          # Database user (default: user)
-POSTGRES_PASSWORD=password  # Database password (default: password)
-POSTGRES_DBNAME=orderdb     # Database name (default: orderdb)
-POSTGRES_SSLMODE=disable    # SSL mode (default: disable)
-
-# Connection Pool Settings (optimized for high concurrency)
-DB_MAX_OPEN_CONNS=300        # Maximum open connections (default: 300)
-DB_MAX_IDLE_CONNS=150        # Maximum idle connections (default: 150)
-DB_CONN_MAX_LIFETIME=45m     # Connection max lifetime (default: 45m)
-DB_CONN_MAX_IDLE_TIME=20m    # Connection max idle time (default: 20m)
-DB_PING_TIMEOUT=15s          # Database ping timeout (default: 15s)
-```
-
-### Server Configuration
-
-```bash
-PORT=8080                    # Server port (default: 8080)
-GIN_MODE=debug              # Gin mode: debug, release
-```
-
-### Environment Presets
-
-**Development** (lower resource usage):
-
-```bash
-DB_MAX_OPEN_CONNS=50
-DB_MAX_IDLE_CONNS=25
-```
-
-**Production** (high performance):
-
-```bash
-DB_MAX_OPEN_CONNS=300
-DB_MAX_IDLE_CONNS=150
-```
-
-**Extreme Load** (for 10K+ concurrent orders):
-
-```bash
-DB_MAX_OPEN_CONNS=400
-DB_MAX_IDLE_CONNS=200
-```
-
-## Database Schema
-
-**Orders Table:**
-
-- id, customer_name, customer_email, total_amount, status, created_at, updated_at
-
-**Order Items Table:**
-
-- id, order_id, product_name, quantity, unit_price, total_price
-
-**Valid Order Statuses:**
-
-- pending, processing, completed, cancelled
-
-## Architecture
-
-Clean Architecture with:
-
-- **Domain Layer**: Business entities and rules
-- **Use Case Layer**: Application business logic with goroutine support
-- **Repository Layer**: Data access interfaces with transaction safety
-- **Infrastructure Layer**: Database implementations with connection pooling
-- **API Layer**: HTTP handlers with concurrent request processing
+**Built with Clean Architecture • High Concurrency • PostgreSQL • Swagger Documentation**

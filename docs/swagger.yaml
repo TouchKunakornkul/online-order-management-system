@@ -1,0 +1,292 @@
+basePath: /api/v1
+definitions:
+  dto.CreateOrderItemRequest:
+    properties:
+      product_name:
+        example: Laptop Computer
+        type: string
+      quantity:
+        example: 2
+        minimum: 1
+        type: integer
+      unit_price:
+        example: 999.99
+        minimum: 0
+        type: number
+    required:
+    - product_name
+    - quantity
+    - unit_price
+    type: object
+  dto.CreateOrderRequest:
+    properties:
+      customer_email:
+        example: john.doe@example.com
+        type: string
+      customer_name:
+        example: John Doe
+        type: string
+      items:
+        items:
+          $ref: '#/definitions/dto.CreateOrderItemRequest'
+        minItems: 1
+        type: array
+    required:
+    - customer_email
+    - customer_name
+    - items
+    type: object
+  dto.ErrorResponse:
+    properties:
+      error:
+        example: Invalid request parameters
+        type: string
+    type: object
+  dto.ListOrdersResponse:
+    properties:
+      orders:
+        items:
+          $ref: '#/definitions/dto.OrderResponse'
+        type: array
+      pagination:
+        $ref: '#/definitions/dto.PaginationResponse'
+    type: object
+  dto.OrderItemResponse:
+    properties:
+      id:
+        example: 67890
+        type: integer
+      order_id:
+        example: 12345
+        type: integer
+      product_name:
+        example: Laptop Computer
+        type: string
+      quantity:
+        example: 2
+        type: integer
+      total_price:
+        example: 1999.98
+        type: number
+      unit_price:
+        example: 999.99
+        type: number
+    type: object
+  dto.OrderResponse:
+    properties:
+      created_at:
+        example: "2023-06-15T10:30:00Z"
+        type: string
+      customer_email:
+        example: john.doe@example.com
+        type: string
+      customer_name:
+        example: John Doe
+        type: string
+      id:
+        example: 12345
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/dto.OrderItemResponse'
+        type: array
+      status:
+        enum:
+        - pending
+        - processing
+        - completed
+        - cancelled
+        example: pending
+        type: string
+      total_amount:
+        example: 1999.98
+        type: number
+      updated_at:
+        example: "2023-06-15T10:30:00Z"
+        type: string
+    type: object
+  dto.PaginationResponse:
+    properties:
+      current_page:
+        example: 1
+        type: integer
+      items_per_page:
+        example: 10
+        type: integer
+      total_count:
+        example: 95
+        type: integer
+      total_pages:
+        example: 10
+        type: integer
+    type: object
+  dto.SuccessResponse:
+    properties:
+      message:
+        example: Operation completed successfully
+        type: string
+    type: object
+  dto.UpdateOrderStatusRequest:
+    properties:
+      status:
+        enum:
+        - pending
+        - processing
+        - completed
+        - cancelled
+        example: processing
+        type: string
+    required:
+    - status
+    type: object
+externalDocs:
+  description: OpenAPI
+  url: https://swagger.io/resources/open-api/
+host: localhost:8080
+info:
+  contact:
+    email: support@swagger.io
+    name: API Support
+    url: http://www.swagger.io/support
+  description: A high-performance order management system built with Go, featuring
+    concurrent order processing and Clean Architecture.
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: http://swagger.io/terms/
+  title: Online Order Management System API
+  version: "1.0"
+paths:
+  /orders:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve a paginated list of orders using page number and limit
+      parameters:
+      - description: 'Page number (default: 1, min: 1)'
+        in: query
+        name: page
+        type: integer
+      - description: 'Number of orders to return (default: 10, max: 100)'
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Orders retrieved successfully
+          schema:
+            $ref: '#/definitions/dto.ListOrdersResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      summary: List orders with pagination
+      tags:
+      - orders
+    post:
+      consumes:
+      - application/json
+      description: Create a new order with customer information and items
+      parameters:
+      - description: Order creation request
+        in: body
+        name: order
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateOrderRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Order created successfully
+          schema:
+            $ref: '#/definitions/dto.OrderResponse'
+        "400":
+          description: Invalid request body
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      summary: Create a new order
+      tags:
+      - orders
+  /orders/{id}:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve a specific order by its ID
+      parameters:
+      - description: Order ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Order retrieved successfully
+          schema:
+            $ref: '#/definitions/dto.OrderResponse'
+        "400":
+          description: Invalid order ID
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "404":
+          description: Order not found
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      summary: Get an order by ID
+      tags:
+      - orders
+  /orders/{id}/status:
+    put:
+      consumes:
+      - application/json
+      description: Update the status of an existing order
+      parameters:
+      - description: Order ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Status update request
+        in: body
+        name: status
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateOrderStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Order status updated successfully
+          schema:
+            $ref: '#/definitions/dto.SuccessResponse'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "404":
+          description: Order not found
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.ErrorResponse'
+      summary: Update order status
+      tags:
+      - orders
+securityDefinitions:
+  BasicAuth:
+    type: basic
+swagger: "2.0"

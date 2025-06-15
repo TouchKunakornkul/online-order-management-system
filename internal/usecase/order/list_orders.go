@@ -20,12 +20,17 @@ func NewListOrdersUseCase(orderRepo repository.OrderRepository) *ListOrdersUseCa
 
 // ListOrdersResponse represents the response for listing orders
 type ListOrdersResponse struct {
-	Orders     []*entity.Order `json:"orders"`
-	NextCursor string          `json:"next_cursor,omitempty"`
+	Orders     []*entity.Order            `json:"orders"`
+	Pagination *repository.PaginationInfo `json:"pagination"`
 }
 
 // Execute retrieves orders with pagination
-func (uc *ListOrdersUseCase) Execute(ctx context.Context, limit int, cursor string) (*ListOrdersResponse, error) {
+func (uc *ListOrdersUseCase) Execute(ctx context.Context, page int, limit int) (*ListOrdersResponse, error) {
+	// Set default page if not provided or invalid
+	if page <= 0 {
+		page = 1
+	}
+
 	// Set default limit if not provided or invalid
 	if limit <= 0 {
 		limit = 10
@@ -36,13 +41,13 @@ func (uc *ListOrdersUseCase) Execute(ctx context.Context, limit int, cursor stri
 		limit = 100
 	}
 
-	orders, nextCursor, err := uc.orderRepo.ListOrders(ctx, limit, cursor)
+	orders, paginationInfo, err := uc.orderRepo.ListOrders(ctx, page, limit)
 	if err != nil {
 		return nil, err
 	}
 
 	return &ListOrdersResponse{
 		Orders:     orders,
-		NextCursor: nextCursor,
+		Pagination: paginationInfo,
 	}, nil
 }

@@ -17,6 +17,10 @@ help:
 	@echo "  make db-reset       - Reset database (stop, remove, start)"
 	@echo "  make clean          - Clean build artifacts"
 	@echo "  make dev            - Start development environment (db + server)"
+	@echo "  make swagger-install - Install Swagger generator"
+	@echo "  make swagger-generate - Generate Swagger documentation"
+	@echo "  make swagger-clean  - Clean Swagger documentation"
+	@echo "  make swagger-regen  - Regenerate Swagger documentation"
 
 # Build the application
 build:
@@ -218,4 +222,27 @@ test-debug: build db-up
 
 # Run comprehensive stress testing
 test-all-stress: test-stress test-stress-extreme
-	@echo "🎯 All stress tests completed!" 
+	@echo "🎯 All stress tests completed!"
+
+# Generate Swagger documentation
+swagger-generate:
+	@echo "📚 Generating Swagger documentation..."
+	@$$(go env GOPATH)/bin/swag init
+	@echo "✅ Swagger documentation generated successfully!"
+	@echo "📖 View at: http://localhost:8080/swagger/index.html (when server is running)"
+
+# Install Swagger generator
+swagger-install:
+	@echo "📦 Installing Swagger generator..."
+	go install github.com/swaggo/swag/cmd/swag@latest
+	@echo "✅ Swagger generator installed successfully!"
+
+# Clean Swagger documentation
+swagger-clean:
+	@echo "🧹 Cleaning Swagger documentation..."
+	rm -rf docs/
+	@echo "✅ Swagger documentation cleaned!"
+
+# Regenerate Swagger documentation (clean + generate)
+swagger-regen: swagger-clean swagger-generate
+	@echo "🔄 Swagger documentation regenerated!" 

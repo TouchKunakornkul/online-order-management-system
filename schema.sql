@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS order_items (
 );
 
 -- Create indexes for better performance
-CREATE INDEX IF NOT EXISTS idx_orders_created_at_id ON orders(created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_orders_created_at_id ON orders(created_at DESC, id DESC); -- For pagination ordering
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_customer_email ON orders(customer_email);
 CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
