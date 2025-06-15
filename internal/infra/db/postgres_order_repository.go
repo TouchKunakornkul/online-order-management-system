@@ -8,7 +8,6 @@ import (
 	"online-order-management-system/internal/domain/repository"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -26,8 +25,68 @@ func NewPostgresOrderRepository(db *sql.DB) repository.OrderRepository {
 	}
 }
 
+// isConnectionError checks if the error is related to database connection limits
+func isConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "too many clients already") ||
+		strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "connection reset")
+}
+
+// retryWithBackoff executes a function with exponential backoff retry logic
+func retryWithBackoff(ctx context.Context, maxRetries int, fn func() error) error {
+	var lastErr error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			// Exponential backoff with jitter
+			backoff := time.Duration(attempt*attempt) * 10 * time.Millisecond
+			if backoff > 500*time.Millisecond {
+				backoff = 500 * time.Millisecond
+			}
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff):
+			}
+		}
+
+		err := fn()
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+
+		// Only retry on connection errors
+		if !isConnectionError(err) {
+			return err
+		}
+	}
+
+	return fmt.Errorf("max retries exceeded: %w", lastErr)
+}
+
 // CreateOrderWithItems creates a new order with its items in a single transaction
+// This method is designed to handle concurrent requests efficiently with retry logic
 func (r *PostgresOrderRepository) CreateOrderWithItems(ctx context.Context, order *entity.Order) (*entity.Order, error) {
+	var createdOrder *entity.Order
+
+	err := retryWithBackoff(ctx, 3, func() error {
+		var err error
+		createdOrder, err = r.createOrderWithItemsInternal(ctx, order)
+		return err
+	})
+
+	return createdOrder, err
+}
+
+// createOrderWithItemsInternal is the internal implementation without retry logic
+func (r *PostgresOrderRepository) createOrderWithItemsInternal(ctx context.Context, order *entity.Order) (*entity.Order, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
@@ -206,7 +265,7 @@ func (r *PostgresOrderRepository) ListOrders(ctx context.Context, limit int, cur
 
 	var orders []*entity.Order
 	for rows.Next() {
-		var order entity.Order
+		order := &entity.Order{}
 		err := rows.Scan(
 			&order.ID,
 			&order.CustomerName,
@@ -219,27 +278,26 @@ func (r *PostgresOrderRepository) ListOrders(ctx context.Context, limit int, cur
 		if err != nil {
 			return nil, "", fmt.Errorf("failed to scan order: %w", err)
 		}
-		orders = append(orders, &order)
+
+		// Get items for each order
+		items, err := r.getOrderItems(ctx, order.ID)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to get order items: %w", err)
+		}
+		order.Items = items
+
+		orders = append(orders, order)
 	}
 
 	if err = rows.Err(); err != nil {
 		return nil, "", fmt.Errorf("error iterating orders: %w", err)
 	}
 
-	// Generate next cursor if we have results
+	// Generate next cursor if we have orders
 	var nextCursor string
 	if len(orders) > 0 {
 		lastOrder := orders[len(orders)-1]
 		nextCursor = fmt.Sprintf("%s_%d", lastOrder.CreatedAt.Format(time.RFC3339), lastOrder.ID)
-	}
-
-	// Load items for each order
-	for _, order := range orders {
-		items, err := r.getOrderItems(ctx, order.ID)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to load items for order %d: %w", order.ID, err)
-		}
-		order.Items = items
 	}
 
 	return orders, nextCursor, nil
@@ -247,18 +305,12 @@ func (r *PostgresOrderRepository) ListOrders(ctx context.Context, limit int, cur
 
 // UpdateOrderStatus updates the status of an existing order
 func (r *PostgresOrderRepository) UpdateOrderStatus(ctx context.Context, id int64, status string) error {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
 	query := `
-		UPDATE orders 
-		SET status = $1, updated_at = $2 
+		UPDATE orders
+		SET status = $1, updated_at = $2
 		WHERE id = $3`
 
-	result, err := tx.ExecContext(ctx, query, status, time.Now(), id)
+	result, err := r.db.ExecContext(ctx, query, status, time.Now(), id)
 	if err != nil {
 		return fmt.Errorf("failed to update order status: %w", err)
 	}
@@ -272,95 +324,10 @@ func (r *PostgresOrderRepository) UpdateOrderStatus(ctx context.Context, id int6
 		return fmt.Errorf("order not found")
 	}
 
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
 	return nil
 }
 
-// BulkCreateOrders creates multiple orders concurrently
-func (r *PostgresOrderRepository) BulkCreateOrders(ctx context.Context, orders []*entity.Order) ([]*entity.Order, error) {
-	const maxWorkers = 10
-	const batchSize = 100
-
-	// Channel for work distribution
-	orderChan := make(chan *entity.Order, len(orders))
-	resultChan := make(chan *entity.Order, len(orders))
-	errorChan := make(chan error, len(orders))
-
-	// Start workers
-	var wg sync.WaitGroup
-	for i := 0; i < maxWorkers && i < len(orders); i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for order := range orderChan {
-				createdOrder, err := r.CreateOrderWithItems(ctx, order)
-				if err != nil {
-					errorChan <- err
-					continue
-				}
-				resultChan <- createdOrder
-			}
-		}()
-	}
-
-	// Send work to workers
-	go func() {
-		defer close(orderChan)
-		for _, order := range orders {
-			select {
-			case orderChan <- order:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-
-	// Wait for workers to complete
-	go func() {
-		wg.Wait()
-		close(resultChan)
-		close(errorChan)
-	}()
-
-	// Collect results
-	var createdOrders []*entity.Order
-	var errors []error
-
-	for {
-		select {
-		case order, ok := <-resultChan:
-			if !ok {
-				resultChan = nil
-			} else {
-				createdOrders = append(createdOrders, order)
-			}
-		case err, ok := <-errorChan:
-			if !ok {
-				errorChan = nil
-			} else {
-				errors = append(errors, err)
-			}
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-
-		if resultChan == nil && errorChan == nil {
-			break
-		}
-	}
-
-	// Return error if any occurred
-	if len(errors) > 0 {
-		return createdOrders, fmt.Errorf("bulk create failed with %d errors: %v", len(errors), errors[0])
-	}
-
-	return createdOrders, nil
-}
-
-// getOrderItems is a helper method to retrieve items for a specific order
+// getOrderItems retrieves order items for a given order ID
 func (r *PostgresOrderRepository) getOrderItems(ctx context.Context, orderID int64) ([]entity.OrderItem, error) {
 	query := `
 		SELECT id, order_id, product_name, quantity, unit_price, total_price
@@ -370,7 +337,7 @@ func (r *PostgresOrderRepository) getOrderItems(ctx context.Context, orderID int
 
 	rows, err := r.db.QueryContext(ctx, query, orderID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get order items: %w", err)
+		return nil, fmt.Errorf("failed to query order items: %w", err)
 	}
 	defer rows.Close()
 

@@ -1,37 +1,33 @@
 package main
 
 import (
-	"database/sql"
-	"fmt"
 	"log"
 	"net/http"
 	"online-order-management-system/internal/api/http/handler"
 	"online-order-management-system/internal/infra/db"
+	"online-order-management-system/internal/middleware"
 	"online-order-management-system/internal/usecase/order"
 	"os"
-	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
 
 func main() {
-	// Database connection
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		dbURL = "postgres://user:password@localhost/orderdb?sslmode=disable"
+	// Load .env file if it exists (ignore error if file doesn't exist)
+	if err := godotenv.Load(); err != nil {
+		log.Printf("No .env file found or error loading .env file: %v", err)
+	} else {
+		log.Printf("✅ Loaded configuration from .env file")
 	}
 
-	database, err := sql.Open("postgres", dbURL)
+	// Database connection using environment-based configuration
+	database, err := db.NewPostgresDB()
 	if err != nil {
 		log.Fatal("Failed to connect to database:", err)
 	}
 	defer database.Close()
-
-	// Test database connection
-	if err := database.Ping(); err != nil {
-		log.Fatal("Failed to ping database:", err)
-	}
 
 	// Initialize repository
 	orderRepo := db.NewPostgresOrderRepository(database)
@@ -41,7 +37,6 @@ func main() {
 	getOrderUC := order.NewGetOrderUseCase(orderRepo)
 	listOrdersUC := order.NewListOrdersUseCase(orderRepo)
 	updateOrderStatusUC := order.NewUpdateOrderStatusUseCase(orderRepo)
-	bulkCreateOrdersUC := order.NewBulkCreateOrdersUseCase(orderRepo)
 
 	// Initialize handler
 	orderHandler := handler.NewOrderHandler(
@@ -49,33 +44,23 @@ func main() {
 		getOrderUC,
 		listOrdersUC,
 		updateOrderStatusUC,
-		bulkCreateOrdersUC,
 	)
 
 	// Initialize Gin router
 	router := gin.Default()
 
 	// Middleware
-	router.Use(GinLoggingMiddleware())
-	router.Use(CORSMiddleware())
+	router.Use(middleware.GinLoggingMiddleware())
+	router.Use(middleware.CORSMiddleware())
 
 	// Health check endpoint
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "healthy"})
 	})
 
-	// API routes
+	// API routes - use the handler's RegisterRoutes method
 	api := router.Group("/api/v1")
-	{
-		orders := api.Group("/orders")
-		{
-			orders.POST("", orderHandler.CreateOrder)
-			orders.POST("/bulk", orderHandler.BulkCreateOrders)
-			orders.GET("", orderHandler.ListOrders)
-			orders.GET("/:id", orderHandler.GetOrder)
-			orders.PUT("/:id/status", orderHandler.UpdateOrderStatus)
-		}
-	}
+	orderHandler.RegisterRoutes(api)
 
 	// Start server
 	port := os.Getenv("PORT")
@@ -86,39 +71,5 @@ func main() {
 	log.Printf("Server starting on port %s", port)
 	if err := router.Run(":" + port); err != nil {
 		log.Fatal("Failed to start server:", err)
-	}
-}
-
-// GinLoggingMiddleware provides request logging for Gin
-func GinLoggingMiddleware() gin.HandlerFunc {
-	return gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
-		return fmt.Sprintf("%s - [%s] \"%s %s %s %d %s \"%s\" %s\"\n",
-			param.ClientIP,
-			param.TimeStamp.Format(time.RFC1123),
-			param.Method,
-			param.Path,
-			param.Request.Proto,
-			param.StatusCode,
-			param.Latency,
-			param.Request.UserAgent(),
-			param.ErrorMessage,
-		)
-	})
-}
-
-// CORSMiddleware handles Cross-Origin Resource Sharing
-func CORSMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Credentials", "true")
-		c.Header("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
-		c.Header("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
-
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
-
-		c.Next()
 	}
 }

@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"net/http"
+	"online-order-management-system/internal/api/http/handler/dto"
+	"online-order-management-system/internal/domain/entity"
 	"online-order-management-system/internal/usecase/order"
 	"strconv"
 	"time"
@@ -10,38 +12,51 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// Use case interfaces for better testability
+type CreateOrderUseCase interface {
+	Execute(ctx context.Context, req order.CreateOrderRequest) (*entity.Order, error)
+}
+
+type GetOrderUseCase interface {
+	Execute(ctx context.Context, id int64) (*entity.Order, error)
+}
+
+type ListOrdersUseCase interface {
+	Execute(ctx context.Context, limit int, cursor string) (*order.ListOrdersResponse, error)
+}
+
+type UpdateOrderStatusUseCase interface {
+	Execute(ctx context.Context, id int64, status string) error
+}
+
 // OrderHandler handles HTTP requests for order operations
 type OrderHandler struct {
-	createOrderUC       *order.CreateOrderUseCase
-	getOrderUC          *order.GetOrderUseCase
-	listOrdersUC        *order.ListOrdersUseCase
-	updateOrderStatusUC *order.UpdateOrderStatusUseCase
-	bulkCreateOrdersUC  *order.BulkCreateOrdersUseCase
+	createOrderUC       CreateOrderUseCase
+	getOrderUC          GetOrderUseCase
+	listOrdersUC        ListOrdersUseCase
+	updateOrderStatusUC UpdateOrderStatusUseCase
 }
 
 // NewOrderHandler creates a new OrderHandler
 func NewOrderHandler(
-	createOrderUC *order.CreateOrderUseCase,
-	getOrderUC *order.GetOrderUseCase,
-	listOrdersUC *order.ListOrdersUseCase,
-	updateOrderStatusUC *order.UpdateOrderStatusUseCase,
-	bulkCreateOrdersUC *order.BulkCreateOrdersUseCase,
+	createOrderUC CreateOrderUseCase,
+	getOrderUC GetOrderUseCase,
+	listOrdersUC ListOrdersUseCase,
+	updateOrderStatusUC UpdateOrderStatusUseCase,
 ) *OrderHandler {
 	return &OrderHandler{
 		createOrderUC:       createOrderUC,
 		getOrderUC:          getOrderUC,
 		listOrdersUC:        listOrdersUC,
 		updateOrderStatusUC: updateOrderStatusUC,
-		bulkCreateOrdersUC:  bulkCreateOrdersUC,
 	}
 }
 
 // RegisterRoutes registers all order routes to the Gin router
-func (h *OrderHandler) RegisterRoutes(router *gin.Engine) {
+func (h *OrderHandler) RegisterRoutes(router gin.IRouter) {
 	orders := router.Group("/orders")
 	{
 		orders.POST("", h.CreateOrder)
-		orders.POST("/bulk", h.BulkCreateOrders)
 		orders.GET("", h.ListOrders)
 		orders.GET("/:id", h.GetOrder)
 		orders.PUT("/:id/status", h.UpdateOrderStatus)
@@ -50,22 +65,26 @@ func (h *OrderHandler) RegisterRoutes(router *gin.Engine) {
 
 // CreateOrder handles POST /orders
 func (h *OrderHandler) CreateOrder(c *gin.Context) {
-	var req order.CreateOrderRequest
+	var req dto.CreateOrderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, dto.ErrorResponse{Error: err.Error()})
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
 
-	createdOrder, err := h.createOrderUC.Execute(ctx, req)
+	// Convert DTO to usecase request
+	useCaseReq := req.ToUseCaseCreateOrderRequest()
+	createdOrder, err := h.createOrderUC.Execute(ctx, useCaseReq)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusCreated, createdOrder)
+	// Convert domain entity to DTO response
+	response := dto.FromDomainOrder(createdOrder)
+	c.JSON(http.StatusCreated, response)
 }
 
 // GetOrder handles GET /orders/:id
@@ -73,24 +92,26 @@ func (h *OrderHandler) GetOrder(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid order ID"})
+		c.JSON(http.StatusBadRequest, dto.ErrorResponse{Error: "invalid order ID"})
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
 
-	order, err := h.getOrderUC.Execute(ctx, id)
+	domainOrder, err := h.getOrderUC.Execute(ctx, id)
 	if err != nil {
 		if err.Error() == "order not found" {
-			c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
+			c.JSON(http.StatusNotFound, dto.ErrorResponse{Error: "order not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, order)
+	// Convert domain entity to DTO response
+	response := dto.FromDomainOrder(domainOrder)
+	c.JSON(http.StatusOK, response)
 }
 
 // ListOrders handles GET /orders
@@ -107,12 +128,14 @@ func (h *OrderHandler) ListOrders(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
 
-	response, err := h.listOrdersUC.Execute(ctx, limit, cursor)
+	useCaseResponse, err := h.listOrdersUC.Execute(ctx, limit, cursor)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
 		return
 	}
 
+	// Convert usecase response to DTO response
+	response := dto.FromUseCaseListOrdersResponse(useCaseResponse)
 	c.JSON(http.StatusOK, response)
 }
 
@@ -121,13 +144,13 @@ func (h *OrderHandler) UpdateOrderStatus(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid order ID"})
+		c.JSON(http.StatusBadRequest, dto.ErrorResponse{Error: "invalid order ID"})
 		return
 	}
 
-	var req order.UpdateOrderStatusRequest
+	var req dto.UpdateOrderStatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, dto.ErrorResponse{Error: err.Error()})
 		return
 	}
 
@@ -137,32 +160,12 @@ func (h *OrderHandler) UpdateOrderStatus(c *gin.Context) {
 	err = h.updateOrderStatusUC.Execute(ctx, id, req.Status)
 	if err != nil {
 		if err.Error() == "order not found" {
-			c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
+			c.JSON(http.StatusNotFound, dto.ErrorResponse{Error: "order not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "order status updated successfully"})
-}
-
-// BulkCreateOrders handles POST /orders/bulk
-func (h *OrderHandler) BulkCreateOrders(c *gin.Context) {
-	var req order.BulkCreateOrdersRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Minute) // Longer timeout for bulk operations
-	defer cancel()
-
-	response, err := h.bulkCreateOrdersUC.Execute(ctx, req)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusCreated, response)
+	c.JSON(http.StatusOK, dto.SuccessResponse{Message: "order status updated successfully"})
 }

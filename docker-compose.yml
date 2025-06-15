@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   postgres:
     image: postgres:15-alpine
@@ -8,6 +6,18 @@ services:
       POSTGRES_DB: orderdb
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
+    command: >
+      postgres
+      -c max_connections=400
+      -c shared_buffers=512MB
+      -c effective_cache_size=2GB
+      -c maintenance_work_mem=128MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=32MB
+      -c default_statistics_target=100
+      -c work_mem=8MB
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
     ports:
       - "5432:5432"
     volumes:

@@ -18,7 +18,4 @@ type OrderRepository interface {
 
 	// UpdateOrderStatus updates the status of an existing order
 	UpdateOrderStatus(ctx context.Context, id int64, status string) error
-
-	// BulkCreateOrders creates multiple orders concurrently
-	BulkCreateOrders(ctx context.Context, orders []*entity.Order) ([]*entity.Order, error)
 }
