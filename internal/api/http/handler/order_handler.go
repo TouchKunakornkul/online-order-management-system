@@ -97,6 +97,11 @@ func getValidationErrorMessage(err error) string {
 		return "Invalid email format"
 	}
 
+	// Handle items array validation errors
+	if strings.Contains(errStr, "min") && strings.Contains(errStr, "Items") {
+		return "At least one item is required"
+	}
+
 	// Handle quantity validation errors
 	if strings.Contains(errStr, "min") && strings.Contains(errStr, "Quantity") {
 		return "Quantity must be at least 1"
