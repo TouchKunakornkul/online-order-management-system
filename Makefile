@@ -131,6 +131,7 @@ test-stress: build db-up
 		sleep 1; \
 	done; \
 	echo "🔥 Running stress test: 1,000 orders with 100 concurrent goroutines..."; \
+	go clean -testcache; \
 	if go test -v ./test/ -run TestStressTest_1000Orders; then \
 		echo "✅ Stress test completed successfully!"; \
 		RESULT=0; \
@@ -167,6 +168,7 @@ test-stress-extreme: build db-up
 		sleep 1; \
 	done; \
 	echo "🚨 Running EXTREME stress test: 10,000 orders with 500 concurrent goroutines..."; \
+	go clean -testcache; \
 	if go test -v ./test/ -run TestStressTest_10000Orders -timeout=15m; then \
 		echo "✅ EXTREME stress test completed!"; \
 		RESULT=0; \

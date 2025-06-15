@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -253,13 +254,22 @@ func calculateStressTestResults(metrics []OrderMetrics, testDuration time.Durati
 	return result
 }
 
+// getStressTestBaseURL returns the base URL for stress testing
+// Supports both regular and isolated stress testing
+func getStressTestBaseURL() string {
+	if baseURL := os.Getenv("STRESS_TEST_BASE_URL"); baseURL != "" {
+		return baseURL
+	}
+	return "http://localhost:8080" // Default for regular stress testing
+}
+
 func TestStressTest_1000Orders(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping stress test in short mode")
 	}
 
 	config := StressTestConfig{
-		BaseURL:        "http://localhost:8080",
+		BaseURL:        getStressTestBaseURL(),
 		TotalOrders:    1000,
 		MaxConcurrency: 100, // 100 concurrent goroutines
 		RequestTimeout: 30 * time.Second,
@@ -323,7 +333,7 @@ func TestStressTest_10000Orders(t *testing.T) {
 	}
 
 	config := StressTestConfig{
-		BaseURL:        "http://localhost:8080",
+		BaseURL:        getStressTestBaseURL(),
 		TotalOrders:    10000,
 		MaxConcurrency: 500,              // 500 concurrent goroutines for extreme load
 		RequestTimeout: 60 * time.Second, // Longer timeout for extreme load
@@ -388,7 +398,7 @@ func TestStressTest_10000Orders(t *testing.T) {
 
 func BenchmarkStressTest_OrderCreation(b *testing.B) {
 	config := StressTestConfig{
-		BaseURL:        "http://localhost:8080",
+		BaseURL:        getStressTestBaseURL(),
 		RequestTimeout: 30 * time.Second,
 	}
 
