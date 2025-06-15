@@ -3,12 +3,15 @@ package handler
 import (
 	"context"
 	"net/http"
+	"strconv"
+	"time"
+
 	"online-order-management-system/internal/api/http/handler/dto"
+	"online-order-management-system/internal/api/validation"
 	"online-order-management-system/internal/domain/entity"
 	"online-order-management-system/internal/usecase/order"
-	"strconv"
-	"strings"
-	"time"
+	apperrors "online-order-management-system/pkg/errors"
+	"online-order-management-system/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 )
@@ -32,24 +35,26 @@ type UpdateOrderStatusUseCase interface {
 
 // OrderHandler handles HTTP requests for order operations
 type OrderHandler struct {
-	createOrderUC       CreateOrderUseCase
-	getOrderUC          GetOrderUseCase
-	listOrdersUC        ListOrdersUseCase
-	updateOrderStatusUC UpdateOrderStatusUseCase
+	createOrderUC       *order.CreateOrderUseCase
+	getOrderUC          *order.GetOrderUseCase
+	listOrdersUC        *order.ListOrdersUseCase
+	updateOrderStatusUC *order.UpdateOrderStatusUseCase
+	logger              *logger.Logger
 }
 
 // NewOrderHandler creates a new OrderHandler
 func NewOrderHandler(
-	createOrderUC CreateOrderUseCase,
-	getOrderUC GetOrderUseCase,
-	listOrdersUC ListOrdersUseCase,
-	updateOrderStatusUC UpdateOrderStatusUseCase,
+	createOrderUC *order.CreateOrderUseCase,
+	getOrderUC *order.GetOrderUseCase,
+	listOrdersUC *order.ListOrdersUseCase,
+	updateOrderStatusUC *order.UpdateOrderStatusUseCase,
 ) *OrderHandler {
 	return &OrderHandler{
 		createOrderUC:       createOrderUC,
 		getOrderUC:          getOrderUC,
 		listOrdersUC:        listOrdersUC,
 		updateOrderStatusUC: updateOrderStatusUC,
+		logger:              logger.New("order-handler", "1.0.0"),
 	}
 }
 
@@ -64,53 +69,14 @@ func (h *OrderHandler) RegisterRoutes(router gin.IRouter) {
 	}
 }
 
-// getValidationErrorMessage returns user-friendly error messages for validation failures
-func getValidationErrorMessage(err error) string {
-	errStr := err.Error()
-
-	// Handle status validation errors
-	if strings.Contains(errStr, "oneof") && strings.Contains(errStr, "Status") {
-		return "Invalid status. Must be one of: pending, processing, completed, cancelled"
-	}
-
-	// Handle required field errors
-	if strings.Contains(errStr, "required") {
-		if strings.Contains(errStr, "CustomerName") {
-			return "Customer name is required"
-		}
-		if strings.Contains(errStr, "Items") {
-			return "At least one item is required"
-		}
-		if strings.Contains(errStr, "ProductName") {
-			return "Product name is required for all items"
-		}
-		if strings.Contains(errStr, "Status") {
-			return "Status is required"
+// getTraceID extracts trace ID from gin context
+func getTraceID(c *gin.Context) string {
+	if traceID, exists := c.Get("trace_id"); exists {
+		if str, ok := traceID.(string); ok {
+			return str
 		}
 	}
-
-	// Handle items array validation errors
-	if strings.Contains(errStr, "min") && strings.Contains(errStr, "Items") {
-		return "At least one item is required"
-	}
-
-	// Handle quantity validation errors
-	if strings.Contains(errStr, "min") && strings.Contains(errStr, "Quantity") {
-		return "Quantity must be at least 1"
-	}
-
-	// Handle price validation errors
-	if strings.Contains(errStr, "min") && strings.Contains(errStr, "UnitPrice") {
-		return "Unit price must be 0 or greater"
-	}
-
-	// Handle JSON parsing errors
-	if strings.Contains(errStr, "invalid character") || strings.Contains(errStr, "unexpected end of JSON") {
-		return "Invalid JSON format in request body"
-	}
-
-	// Default to original error if no specific handling
-	return errStr
+	return ""
 }
 
 // CreateOrder handles POST /orders
@@ -121,14 +87,19 @@ func getValidationErrorMessage(err error) string {
 // @Produce      json
 // @Param        order  body      dto.CreateOrderRequest  true  "Order creation request"
 // @Success      201    {object}  dto.OrderResponse       "Order created successfully"
-// @Failure      400    {object}  dto.ErrorResponse       "Invalid request body"
-// @Failure      500    {object}  dto.ErrorResponse       "Internal server error"
+// @Failure      400    {object}  apperrors.ErrorResponse       "Invalid request body"
+// @Failure      500    {object}  apperrors.ErrorResponse       "Internal server error"
 // @Router       /orders [post]
 func (h *OrderHandler) CreateOrder(c *gin.Context) {
+	traceID := getTraceID(c)
+
 	var req dto.CreateOrderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		friendlyError := getValidationErrorMessage(err)
-		c.JSON(http.StatusBadRequest, dto.ErrorResponse{Error: friendlyError})
+		h.logger.WithError(err).WithField("trace_id", traceID).Warn("Invalid request body")
+		friendlyError := validation.GetOrderValidationMessage(err)
+		validationErr := apperrors.NewValidationError(friendlyError)
+		response := apperrors.ToErrorResponse(validationErr, traceID)
+		c.JSON(validationErr.HTTPStatus, response)
 		return
 	}
 
@@ -139,9 +110,24 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 	useCaseReq := req.ToUseCaseCreateOrderRequest()
 	createdOrder, err := h.createOrderUC.Execute(ctx, useCaseReq)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+		h.logger.WithError(err).WithFields(map[string]interface{}{
+			"trace_id":      traceID,
+			"customer_name": req.CustomerName,
+			"items_count":   len(req.Items),
+		}).Error("Failed to create order")
+
+		response := apperrors.ToErrorResponse(err, traceID)
+		statusCode := apperrors.GetHTTPStatus(err)
+		c.JSON(statusCode, response)
 		return
 	}
+
+	h.logger.WithFields(map[string]interface{}{
+		"trace_id":      traceID,
+		"order_id":      createdOrder.ID,
+		"customer_name": createdOrder.CustomerName,
+		"total_amount":  createdOrder.TotalAmount,
+	}).Info("Successfully created order")
 
 	// Convert domain entity to DTO response
 	response := dto.FromDomainOrder(createdOrder)
@@ -156,15 +142,24 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 // @Produce      json
 // @Param        id   path      int                 true  "Order ID"
 // @Success      200  {object}  dto.OrderResponse   "Order retrieved successfully"
-// @Failure      400  {object}  dto.ErrorResponse   "Invalid order ID"
-// @Failure      404  {object}  dto.ErrorResponse   "Order not found"
-// @Failure      500  {object}  dto.ErrorResponse   "Internal server error"
+// @Failure      400  {object}  apperrors.ErrorResponse   "Invalid order ID"
+// @Failure      404  {object}  apperrors.ErrorResponse   "Order not found"
+// @Failure      500  {object}  apperrors.ErrorResponse   "Internal server error"
 // @Router       /orders/{id} [get]
 func (h *OrderHandler) GetOrder(c *gin.Context) {
+	traceID := getTraceID(c)
+
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, dto.ErrorResponse{Error: "Invalid order ID. Must be a valid number"})
+		h.logger.WithError(err).WithFields(map[string]interface{}{
+			"trace_id": traceID,
+			"id_param": idStr,
+		}).Warn("Invalid order ID parameter")
+
+		validationErr := apperrors.NewValidationError("Invalid order ID. Must be a valid number")
+		response := apperrors.ToErrorResponse(validationErr, traceID)
+		c.JSON(validationErr.HTTPStatus, response)
 		return
 	}
 
@@ -173,13 +168,21 @@ func (h *OrderHandler) GetOrder(c *gin.Context) {
 
 	domainOrder, err := h.getOrderUC.Execute(ctx, id)
 	if err != nil {
-		if err.Error() == "order not found" {
-			c.JSON(http.StatusNotFound, dto.ErrorResponse{Error: "Order not found"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+		h.logger.WithError(err).WithFields(map[string]interface{}{
+			"trace_id": traceID,
+			"order_id": id,
+		}).Error("Failed to get order")
+
+		response := apperrors.ToErrorResponse(err, traceID)
+		statusCode := apperrors.GetHTTPStatus(err)
+		c.JSON(statusCode, response)
 		return
 	}
+
+	h.logger.WithFields(map[string]interface{}{
+		"trace_id": traceID,
+		"order_id": domainOrder.ID,
+	}).Debug("Successfully retrieved order")
 
 	// Convert domain entity to DTO response
 	response := dto.FromDomainOrder(domainOrder)
@@ -195,61 +198,105 @@ func (h *OrderHandler) GetOrder(c *gin.Context) {
 // @Param        page    query     int     false  "Page number (default: 1, min: 1)"
 // @Param        limit   query     int     false  "Number of orders to return (default: 10, max: 100)"
 // @Success      200     {object}  dto.ListOrdersResponse  "Orders retrieved successfully"
-// @Failure      500     {object}  dto.ErrorResponse       "Internal server error"
+// @Failure      500     {object}  apperrors.ErrorResponse       "Internal server error"
 // @Router       /orders [get]
 func (h *OrderHandler) ListOrders(c *gin.Context) {
+	traceID := getTraceID(c)
+
 	// Parse query parameters
-	pageStr := c.DefaultQuery("page", "1")
-	page, err := strconv.Atoi(pageStr)
-	if err != nil || page <= 0 {
-		page = 1
+	page := 1
+	if pageStr := c.Query("page"); pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
 	}
 
-	limitStr := c.DefaultQuery("limit", "10")
-	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit <= 0 {
-		limit = 10
+	limit := 10
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
 
-	useCaseResponse, err := h.listOrdersUC.Execute(ctx, page, limit)
+	result, err := h.listOrdersUC.Execute(ctx, page, limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+		h.logger.WithError(err).WithFields(map[string]interface{}{
+			"trace_id": traceID,
+			"page":     page,
+			"limit":    limit,
+		}).Error("Failed to list orders")
+
+		response := apperrors.ToErrorResponse(err, traceID)
+		statusCode := apperrors.GetHTTPStatus(err)
+		c.JSON(statusCode, response)
 		return
 	}
 
-	// Convert usecase response to DTO response
-	response := dto.FromUseCaseListOrdersResponse(useCaseResponse)
+	h.logger.WithFields(map[string]interface{}{
+		"trace_id":     traceID,
+		"page":         page,
+		"limit":        limit,
+		"orders_count": len(result.Orders),
+		"total_count":  result.Pagination.TotalCount,
+	}).Debug("Successfully listed orders")
+
+	// Convert to DTO response
+	response := dto.ListOrdersResponse{
+		Orders:     make([]dto.OrderResponse, len(result.Orders)),
+		Pagination: dto.FromDomainPaginationInfo(result.Pagination),
+	}
+
+	for i, order := range result.Orders {
+		response.Orders[i] = dto.FromDomainOrder(order)
+	}
+
 	c.JSON(http.StatusOK, response)
 }
 
-// UpdateOrderStatus handles PUT /orders/:id/status
+// UpdateOrderStatus handles PATCH /orders/:id/status
 // @Summary      Update order status
 // @Description  Update the status of an existing order
 // @Tags         orders
 // @Accept       json
 // @Produce      json
-// @Param        id      path      int                           true  "Order ID"
+// @Param        id      path      int                            true  "Order ID"
 // @Param        status  body      dto.UpdateOrderStatusRequest  true  "Status update request"
-// @Success      200     {object}  dto.SuccessResponse           "Order status updated successfully"
-// @Failure      400     {object}  dto.ErrorResponse             "Invalid request"
-// @Failure      404     {object}  dto.ErrorResponse             "Order not found"
-// @Failure      500     {object}  dto.ErrorResponse             "Internal server error"
-// @Router       /orders/{id}/status [put]
+// @Success      200     {object}  dto.SuccessResponse            "Order status updated successfully"
+// @Failure      400     {object}  apperrors.ErrorResponse              "Invalid request"
+// @Failure      404     {object}  apperrors.ErrorResponse              "Order not found"
+// @Failure      500     {object}  apperrors.ErrorResponse              "Internal server error"
+// @Router       /orders/{id}/status [patch]
 func (h *OrderHandler) UpdateOrderStatus(c *gin.Context) {
+	traceID := getTraceID(c)
+
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, dto.ErrorResponse{Error: "Invalid order ID. Must be a valid number"})
+		h.logger.WithError(err).WithFields(map[string]interface{}{
+			"trace_id": traceID,
+			"id_param": idStr,
+		}).Warn("Invalid order ID parameter")
+
+		validationErr := apperrors.NewValidationError("Invalid order ID. Must be a valid number")
+		response := apperrors.ToErrorResponse(validationErr, traceID)
+		c.JSON(validationErr.HTTPStatus, response)
 		return
 	}
 
 	var req dto.UpdateOrderStatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		friendlyError := getValidationErrorMessage(err)
-		c.JSON(http.StatusBadRequest, dto.ErrorResponse{Error: friendlyError})
+		h.logger.WithError(err).WithFields(map[string]interface{}{
+			"trace_id": traceID,
+			"order_id": id,
+		}).Warn("Invalid request body for status update")
+
+		friendlyError := validation.GetOrderValidationMessage(err)
+		validationErr := apperrors.NewValidationError(friendlyError)
+		response := apperrors.ToErrorResponse(validationErr, traceID)
+		c.JSON(validationErr.HTTPStatus, response)
 		return
 	}
 
@@ -258,13 +305,23 @@ func (h *OrderHandler) UpdateOrderStatus(c *gin.Context) {
 
 	err = h.updateOrderStatusUC.Execute(ctx, id, req.Status)
 	if err != nil {
-		if err.Error() == "order not found" {
-			c.JSON(http.StatusNotFound, dto.ErrorResponse{Error: "Order not found"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+		h.logger.WithError(err).WithFields(map[string]interface{}{
+			"trace_id": traceID,
+			"order_id": id,
+			"status":   req.Status,
+		}).Error("Failed to update order status")
+
+		response := apperrors.ToErrorResponse(err, traceID)
+		statusCode := apperrors.GetHTTPStatus(err)
+		c.JSON(statusCode, response)
 		return
 	}
+
+	h.logger.WithFields(map[string]interface{}{
+		"trace_id": traceID,
+		"order_id": id,
+		"status":   req.Status,
+	}).Info("Successfully updated order status")
 
 	c.JSON(http.StatusOK, dto.SuccessResponse{Message: "Order status updated successfully"})
 }

@@ -8,18 +8,29 @@ This project leverages a **Clean Architecture** structure that promotes separati
 
 ```
 online-order-management-system/
-├── cmd/                    # Application entry points
-├── internal/
-│   ├── api/http/handler/   # 🌐 Delivery Layer - HTTP handlers and DTOs
-│   ├── domain/             # 🏛️  Domain Layer - Business entities and repository interfaces
-│   ├── infra/db/          # 🔧 Infrastructure Layer - Database implementations
-│   ├── middleware/        # 🛡️  Cross-cutting concerns - HTTP middleware
-│   └── usecase/           # 💼 Use Case Layer - Business logic and orchestration
-├── test/                  # 🧪 Stress tests and benchmarks
-├── docs/                  # 📚 Auto-generated Swagger documentation
-├── docker-compose.yml     # 🐳 Database setup
-├── schema.sql            # 🗄️  Database schema
-└── main.go               # 🚀 Application entry point
+├── cmd/                           # Application entry points
+├── internal/                      # 🔒 Private application code (Clean Architecture)
+│   ├── api/                       # 🌐 Delivery Layer
+│   │   ├── http/handler/          # HTTP handlers and DTOs
+│   │   └── validation/            # Business-specific validation logic
+│   ├── domain/                    # 🏛️  Domain Layer
+│   │   ├── entity/                # Business entities and rules
+│   │   ├── errors/                # Domain-specific error definitions
+│   │   └── repository/            # Repository interfaces
+│   ├── infra/db/                  # 🔧 Infrastructure Layer - Database implementations
+│   ├── middleware/                # 🛡️  Cross-cutting concerns - HTTP middleware
+│   └── usecase/order/             # 💼 Use Case Layer - Business logic orchestration
+├── pkg/                           # 📦 Domain-agnostic utilities (reusable)
+│   ├── errors/                    # Generic error handling framework
+│   ├── logger/                    # Structured JSON logging
+│   ├── retryutil/                 # Retry utilities with exponential backoff
+│   └── validation/                # Generic validation types and utilities
+├── config/                        # ⚙️  Configuration management
+├── test/                          # 🧪 Stress tests and benchmarks
+├── docs/                          # 📚 Auto-generated Swagger documentation
+├── docker-compose.yml             # 🐳 Database setup
+├── schema.sql                     # 🗄️  Database schema
+└── main.go                        # 🚀 Application entry point
 ```
 
 ## Quick Start

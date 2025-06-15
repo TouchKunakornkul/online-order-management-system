@@ -1,12 +1,12 @@
 package main
 
 import (
-	"log"
 	"net/http"
 	"online-order-management-system/internal/api/http/handler"
 	"online-order-management-system/internal/infra/db"
 	"online-order-management-system/internal/middleware"
 	"online-order-management-system/internal/usecase/order"
+	"online-order-management-system/pkg/logger"
 	"os"
 
 	"github.com/gin-gonic/gin"
@@ -40,19 +40,28 @@ import (
 // @externalDocs.description  OpenAPI
 // @externalDocs.url          https://swagger.io/resources/open-api/
 func main() {
+	// Initialize structured logger
+	appLogger := logger.New("order-management-system", "1.0.0")
+
 	// Load .env file if it exists (ignore error if file doesn't exist)
 	if err := godotenv.Load(); err != nil {
-		log.Printf("No .env file found or error loading .env file: %v", err)
+		appLogger.WithError(err).Warn("No .env file found or error loading .env file")
 	} else {
-		log.Printf("✅ Loaded configuration from .env file")
+		appLogger.Info("Loaded configuration from .env file")
 	}
 
 	// Database connection using environment-based configuration
 	database, err := db.NewPostgresDB()
 	if err != nil {
-		log.Fatal("Failed to connect to database:", err)
+		appLogger.WithError(err).Fatal("Failed to connect to database")
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			appLogger.WithError(err).Error("Failed to close database connection")
+		}
+	}()
+
+	appLogger.Info("Successfully connected to database")
 
 	// Initialize repository
 	orderRepo := db.NewPostgresOrderRepository(database)
@@ -63,6 +72,8 @@ func main() {
 	listOrdersUC := order.NewListOrdersUseCase(orderRepo)
 	updateOrderStatusUC := order.NewUpdateOrderStatusUseCase(orderRepo)
 
+	appLogger.Info("Initialized all use cases")
+
 	// Initialize handler
 	orderHandler := handler.NewOrderHandler(
 		createOrderUC,
@@ -70,6 +81,8 @@ func main() {
 		listOrdersUC,
 		updateOrderStatusUC,
 	)
+
+	appLogger.Info("Initialized handlers")
 
 	// Initialize Gin router
 	router := gin.Default()
@@ -80,7 +93,11 @@ func main() {
 
 	// Health check endpoint
 	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "healthy"})
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "healthy",
+			"service": "order-management-system",
+			"version": "1.0.0",
+		})
 	})
 
 	// Swagger documentation endpoint
@@ -90,15 +107,20 @@ func main() {
 	api := router.Group("/api/v1")
 	orderHandler.RegisterRoutes(api)
 
+	appLogger.Info("Registered all routes and middleware")
+
 	// Start server
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
-	log.Printf("Server starting on port %s", port)
-	log.Printf("📚 Swagger documentation available at: http://localhost:%s/swagger/index.html", port)
+	appLogger.WithFields(map[string]interface{}{
+		"port":        port,
+		"swagger_url": "http://localhost:" + port + "/swagger/index.html",
+	}).Info("Starting server")
+
 	if err := router.Run(":" + port); err != nil {
-		log.Fatal("Failed to start server:", err)
+		appLogger.WithError(err).WithField("port", port).Fatal("Failed to start server")
 	}
 }

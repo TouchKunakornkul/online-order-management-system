@@ -3,71 +3,27 @@ package db
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"online-order-management-system/internal/domain/entity"
 	"online-order-management-system/internal/domain/repository"
-	"strings"
-	"time"
+	apperrors "online-order-management-system/pkg/errors"
+	"online-order-management-system/pkg/logger"
+	"online-order-management-system/pkg/retryutil"
 
 	_ "github.com/lib/pq"
 )
 
 // PostgresOrderRepository implements the OrderRepository interface using PostgreSQL
 type PostgresOrderRepository struct {
-	db *sql.DB
+	db     *sql.DB
+	logger *logger.Logger
 }
 
 // NewPostgresOrderRepository creates a new PostgresOrderRepository
 func NewPostgresOrderRepository(db *sql.DB) repository.OrderRepository {
 	return &PostgresOrderRepository{
-		db: db,
+		db:     db,
+		logger: logger.New("postgres-order-repository", "1.0.0"),
 	}
-}
-
-// isConnectionError checks if the error is related to database connection limits
-func isConnectionError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := err.Error()
-	return strings.Contains(errStr, "too many clients already") ||
-		strings.Contains(errStr, "connection refused") ||
-		strings.Contains(errStr, "connection reset")
-}
-
-// retryWithBackoff executes a function with exponential backoff retry logic
-func retryWithBackoff(ctx context.Context, maxRetries int, fn func() error) error {
-	var lastErr error
-
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		if attempt > 0 {
-			// Exponential backoff with jitter
-			backoff := time.Duration(attempt*attempt) * 10 * time.Millisecond
-			if backoff > 500*time.Millisecond {
-				backoff = 500 * time.Millisecond
-			}
-
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(backoff):
-			}
-		}
-
-		err := fn()
-		if err == nil {
-			return nil
-		}
-
-		lastErr = err
-
-		// Only retry on connection errors
-		if !isConnectionError(err) {
-			return err
-		}
-	}
-
-	return fmt.Errorf("max retries exceeded: %w", lastErr)
 }
 
 // CreateOrderWithItems creates a new order with its items in a single transaction
@@ -75,20 +31,34 @@ func retryWithBackoff(ctx context.Context, maxRetries int, fn func() error) erro
 func (r *PostgresOrderRepository) CreateOrderWithItems(ctx context.Context, order *entity.Order) (*entity.Order, error) {
 	var createdOrder *entity.Order
 
-	err := retryWithBackoff(ctx, 3, func() error {
+	config := retryutil.DefaultRetryConfig()
+	err := retryutil.RetryWithBackoff(ctx, config, func() error {
 		var err error
 		createdOrder, err = r.createOrderWithItemsInternal(ctx, order)
 		return err
 	})
 
-	return createdOrder, err
+	if err != nil {
+		r.logger.WithError(err).WithField("customer_name", order.CustomerName).
+			Error("Failed to create order with items after retries")
+		return nil, apperrors.NewDatabaseTransactionError("Failed to create order").WithCause(err)
+	}
+
+	r.logger.WithFields(map[string]interface{}{
+		"order_id":      createdOrder.ID,
+		"customer_name": createdOrder.CustomerName,
+		"total_amount":  createdOrder.TotalAmount,
+		"items_count":   len(createdOrder.Items),
+	}).Info("Successfully created order with items")
+
+	return createdOrder, nil
 }
 
 // createOrderWithItemsInternal is the internal implementation without retry logic
 func (r *PostgresOrderRepository) createOrderWithItemsInternal(ctx context.Context, order *entity.Order) (*entity.Order, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+		return nil, apperrors.NewDatabaseConnectionError("Failed to begin transaction").WithCause(err)
 	}
 	defer tx.Rollback()
 
@@ -107,7 +77,7 @@ func (r *PostgresOrderRepository) createOrderWithItemsInternal(ctx context.Conte
 		order.UpdatedAt,
 	).Scan(&orderID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to insert order: %w", err)
+		return nil, apperrors.NewDatabaseQueryError("Failed to insert order").WithCause(err)
 	}
 
 	// Insert order items
@@ -127,7 +97,7 @@ func (r *PostgresOrderRepository) createOrderWithItemsInternal(ctx context.Conte
 			item.TotalPrice,
 		).Scan(&itemID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to insert order item: %w", err)
+			return nil, apperrors.NewDatabaseQueryError("Failed to insert order item").WithCause(err)
 		}
 
 		items[i] = entity.OrderItem{
@@ -141,7 +111,7 @@ func (r *PostgresOrderRepository) createOrderWithItemsInternal(ctx context.Conte
 	}
 
 	if err = tx.Commit(); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+		return nil, apperrors.NewDatabaseTransactionError("Failed to commit transaction").WithCause(err)
 	}
 
 	// Return the created order with IDs
@@ -177,46 +147,26 @@ func (r *PostgresOrderRepository) GetOrderByID(ctx context.Context, id int64) (*
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("order not found")
+			r.logger.WithField("order_id", id).Warn("Order not found")
+			return nil, apperrors.NewNotFoundError("order")
 		}
-		return nil, fmt.Errorf("failed to get order: %w", err)
+		r.logger.WithError(err).WithField("order_id", id).Error("Failed to get order")
+		return nil, apperrors.NewDatabaseQueryError("Failed to get order").WithCause(err)
 	}
 
 	// Get order items
-	itemsQuery := `
-		SELECT id, order_id, product_name, quantity, unit_price, total_price
-		FROM order_items
-		WHERE order_id = $1
-		ORDER BY id`
-
-	rows, err := r.db.QueryContext(ctx, itemsQuery, id)
+	items, err := r.getOrderItems(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get order items: %w", err)
+		r.logger.WithError(err).WithField("order_id", id).Error("Failed to get order items")
+		return nil, err
 	}
-	defer rows.Close()
-
-	var items []entity.OrderItem
-	for rows.Next() {
-		var item entity.OrderItem
-		err := rows.Scan(
-			&item.ID,
-			&item.OrderID,
-			&item.ProductName,
-			&item.Quantity,
-			&item.UnitPrice,
-			&item.TotalPrice,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan order item: %w", err)
-		}
-		items = append(items, item)
-	}
-
-	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating order items: %w", err)
-	}
-
 	order.Items = items
+
+	r.logger.WithFields(map[string]interface{}{
+		"order_id":    order.ID,
+		"items_count": len(order.Items),
+	}).Debug("Successfully retrieved order by ID")
+
 	return &order, nil
 }
 
@@ -235,7 +185,8 @@ func (r *PostgresOrderRepository) ListOrders(ctx context.Context, page int, limi
 	var totalCount int64
 	err := r.db.QueryRowContext(ctx, countQuery).Scan(&totalCount)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get total count: %w", err)
+		r.logger.WithError(err).Error("Failed to get total count of orders")
+		return nil, nil, apperrors.NewDatabaseQueryError("Failed to get total count").WithCause(err)
 	}
 
 	// Calculate pagination info
@@ -260,7 +211,12 @@ func (r *PostgresOrderRepository) ListOrders(ctx context.Context, page int, limi
 
 	rows, err := r.db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to list orders: %w", err)
+		r.logger.WithError(err).WithFields(map[string]interface{}{
+			"page":   page,
+			"limit":  limit,
+			"offset": offset,
+		}).Error("Failed to list orders")
+		return nil, nil, apperrors.NewDatabaseQueryError("Failed to list orders").WithCause(err)
 	}
 	defer rows.Close()
 
@@ -276,13 +232,15 @@ func (r *PostgresOrderRepository) ListOrders(ctx context.Context, page int, limi
 			&order.UpdatedAt,
 		)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to scan order: %w", err)
+			r.logger.WithError(err).Error("Failed to scan order")
+			return nil, nil, apperrors.NewDatabaseQueryError("Failed to scan order").WithCause(err)
 		}
 
 		// Get items for each order
 		items, err := r.getOrderItems(ctx, order.ID)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to get order items: %w", err)
+			r.logger.WithError(err).WithField("order_id", order.ID).Error("Failed to get order items")
+			return nil, nil, err
 		}
 		order.Items = items
 
@@ -290,8 +248,17 @@ func (r *PostgresOrderRepository) ListOrders(ctx context.Context, page int, limi
 	}
 
 	if err = rows.Err(); err != nil {
-		return nil, nil, fmt.Errorf("error iterating orders: %w", err)
+		r.logger.WithError(err).Error("Error iterating orders")
+		return nil, nil, apperrors.NewDatabaseQueryError("Error iterating orders").WithCause(err)
 	}
+
+	r.logger.WithFields(map[string]interface{}{
+		"page":         page,
+		"limit":        limit,
+		"total_count":  totalCount,
+		"total_pages":  totalPages,
+		"orders_count": len(orders),
+	}).Debug("Successfully listed orders")
 
 	return orders, paginationInfo, nil
 }
@@ -299,38 +266,49 @@ func (r *PostgresOrderRepository) ListOrders(ctx context.Context, page int, limi
 // UpdateOrderStatus updates the status of an existing order
 func (r *PostgresOrderRepository) UpdateOrderStatus(ctx context.Context, id int64, status string) error {
 	query := `
-		UPDATE orders
-		SET status = $1, updated_at = $2
-		WHERE id = $3`
+		UPDATE orders 
+		SET status = $1, updated_at = NOW()
+		WHERE id = $2`
 
-	result, err := r.db.ExecContext(ctx, query, status, time.Now(), id)
+	result, err := r.db.ExecContext(ctx, query, status, id)
 	if err != nil {
-		return fmt.Errorf("failed to update order status: %w", err)
+		r.logger.WithError(err).WithFields(map[string]interface{}{
+			"order_id": id,
+			"status":   status,
+		}).Error("Failed to update order status")
+		return apperrors.NewDatabaseQueryError("Failed to update order status").WithCause(err)
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
+		r.logger.WithError(err).WithField("order_id", id).Error("Failed to get rows affected")
+		return apperrors.NewDatabaseQueryError("Failed to get rows affected").WithCause(err)
 	}
 
 	if rowsAffected == 0 {
-		return fmt.Errorf("order not found")
+		r.logger.WithField("order_id", id).Warn("Order not found for status update")
+		return apperrors.NewNotFoundError("order")
 	}
+
+	r.logger.WithFields(map[string]interface{}{
+		"order_id": id,
+		"status":   status,
+	}).Info("Successfully updated order status")
 
 	return nil
 }
 
-// getOrderItems retrieves order items for a given order ID
+// getOrderItems retrieves order items for a specific order
 func (r *PostgresOrderRepository) getOrderItems(ctx context.Context, orderID int64) ([]entity.OrderItem, error) {
-	query := `
+	itemsQuery := `
 		SELECT id, order_id, product_name, quantity, unit_price, total_price
 		FROM order_items
 		WHERE order_id = $1
 		ORDER BY id`
 
-	rows, err := r.db.QueryContext(ctx, query, orderID)
+	rows, err := r.db.QueryContext(ctx, itemsQuery, orderID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query order items: %w", err)
+		return nil, apperrors.NewDatabaseQueryError("Failed to get order items").WithCause(err)
 	}
 	defer rows.Close()
 
@@ -346,13 +324,13 @@ func (r *PostgresOrderRepository) getOrderItems(ctx context.Context, orderID int
 			&item.TotalPrice,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan order item: %w", err)
+			return nil, apperrors.NewDatabaseQueryError("Failed to scan order item").WithCause(err)
 		}
 		items = append(items, item)
 	}
 
 	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating order items: %w", err)
+		return nil, apperrors.NewDatabaseQueryError("Error iterating order items").WithCause(err)
 	}
 
 	return items, nil

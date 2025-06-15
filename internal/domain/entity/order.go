@@ -2,6 +2,7 @@ package entity
 
 import (
 	"errors"
+	apperrors "online-order-management-system/pkg/errors"
 	"time"
 )
 
@@ -29,23 +30,43 @@ type OrderItem struct {
 // ValidStatuses defines the valid order statuses
 var ValidStatuses = []string{"pending", "processing", "completed", "cancelled"}
 
+// Domain errors
+var (
+	ErrInvalidCustomerName = errors.New("customer name is required")
+	ErrEmptyItems          = errors.New("order must have at least one item")
+	ErrInvalidQuantity     = errors.New("item quantity must be greater than 0")
+	ErrInvalidUnitPrice    = errors.New("item unit price cannot be negative")
+	ErrInvalidStatus       = errors.New("invalid order status")
+)
+
 // NewOrder creates a new order with validation
 func NewOrder(customerName string, items []OrderItem) (*Order, error) {
 	if customerName == "" {
-		return nil, errors.New("customer name is required")
+		return nil, apperrors.NewInvalidEntityError("customer name is required").WithCause(ErrInvalidCustomerName)
 	}
 	if len(items) == 0 {
-		return nil, errors.New("order must have at least one item")
+		return nil, apperrors.NewInvalidEntityError("order must have at least one item").WithCause(ErrEmptyItems)
 	}
 
 	// Calculate total amount
 	var totalAmount float64
 	for i := range items {
+		if items[i].ProductName == "" {
+			return nil, apperrors.NewInvalidEntityError("product name is required").WithDetails(map[string]interface{}{
+				"item_index": i,
+			})
+		}
 		if items[i].Quantity <= 0 {
-			return nil, errors.New("item quantity must be greater than 0")
+			return nil, apperrors.NewInvalidEntityError("item quantity must be greater than 0").WithDetails(map[string]interface{}{
+				"item_index": i,
+				"quantity":   items[i].Quantity,
+			}).WithCause(ErrInvalidQuantity)
 		}
 		if items[i].UnitPrice < 0 {
-			return nil, errors.New("item unit price cannot be negative")
+			return nil, apperrors.NewInvalidEntityError("item unit price cannot be negative").WithDetails(map[string]interface{}{
+				"item_index": i,
+				"unit_price": items[i].UnitPrice,
+			}).WithCause(ErrInvalidUnitPrice)
 		}
 		items[i].TotalPrice = float64(items[i].Quantity) * items[i].UnitPrice
 		totalAmount += items[i].TotalPrice
@@ -64,11 +85,19 @@ func NewOrder(customerName string, items []OrderItem) (*Order, error) {
 // UpdateStatus updates the order status with validation
 func (o *Order) UpdateStatus(status string) error {
 	if !isValidStatus(status) {
-		return errors.New("invalid order status")
+		return apperrors.NewBusinessRuleViolationError("invalid order status").WithDetails(map[string]interface{}{
+			"provided_status": status,
+			"valid_statuses":  ValidStatuses,
+		}).WithCause(ErrInvalidStatus)
 	}
 	o.Status = status
 	o.UpdatedAt = time.Now()
 	return nil
+}
+
+// IsValidStatus checks if the status is valid (public for external validation)
+func IsValidStatus(status string) bool {
+	return isValidStatus(status)
 }
 
 // isValidStatus checks if the status is valid
@@ -89,4 +118,44 @@ func (o *Order) CalculateTotalAmount() {
 	}
 	o.TotalAmount = total
 	o.UpdatedAt = time.Now()
+}
+
+// Validate performs comprehensive validation of the order entity
+func (o *Order) Validate() error {
+	if o.CustomerName == "" {
+		return apperrors.NewInvalidEntityError("customer name is required").WithCause(ErrInvalidCustomerName)
+	}
+
+	if len(o.Items) == 0 {
+		return apperrors.NewInvalidEntityError("order must have at least one item").WithCause(ErrEmptyItems)
+	}
+
+	if !isValidStatus(o.Status) {
+		return apperrors.NewBusinessRuleViolationError("invalid order status").WithDetails(map[string]interface{}{
+			"current_status": o.Status,
+			"valid_statuses": ValidStatuses,
+		}).WithCause(ErrInvalidStatus)
+	}
+
+	for i, item := range o.Items {
+		if item.ProductName == "" {
+			return apperrors.NewInvalidEntityError("product name is required").WithDetails(map[string]interface{}{
+				"item_index": i,
+			})
+		}
+		if item.Quantity <= 0 {
+			return apperrors.NewInvalidEntityError("item quantity must be greater than 0").WithDetails(map[string]interface{}{
+				"item_index": i,
+				"quantity":   item.Quantity,
+			}).WithCause(ErrInvalidQuantity)
+		}
+		if item.UnitPrice < 0 {
+			return apperrors.NewInvalidEntityError("item unit price cannot be negative").WithDetails(map[string]interface{}{
+				"item_index": i,
+				"unit_price": item.UnitPrice,
+			}).WithCause(ErrInvalidUnitPrice)
+		}
+	}
+
+	return nil
 }
